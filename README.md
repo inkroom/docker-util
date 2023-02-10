@@ -41,3 +41,6 @@ dart compile exe bin/main.dart -o ./build/bili_novel_packer
 ### Koodo Reader显示报错
 这是因为img标签没有正确闭合导致的，输出的html中应该是&lt;img/&gt;而不是&lt;img&gt;
 此问题依赖于[html](https://github.com/dart-lang/html)库，如果无法解决只能更换库
+
+## 和原仓库相比修改了部分代码 （inkbox）
+

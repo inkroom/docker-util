@@ -1,19 +1,39 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:args/args.dart';
 import 'package:bili_novel_packer/bili_novel/bili_novel_http.dart' as bili_http;
 import 'package:bili_novel_packer/bili_novel/bili_novel_model.dart';
 import 'package:bili_novel_packer/bili_novel_packer.dart';
 import 'package:bili_novel_packer/loading_bar.dart';
 import 'package:bili_novel_packer/packer_callback.dart';
 import 'package:console/console.dart';
-
+import 'package:path/path.dart';
 const String gitUrl = "https://gitee.com/Montaro2017/bili_novel_packer";
 const String version = "0.0.1-beta";
 
 void main(List<String> arguments) async {
-  printWelcome();
-  start();
+  var parser = ArgParser();
+
+  parser.addOption("id", abbr: "i", help: "书籍ID");
+  parser.addOption("url", abbr: "u", help: "书籍URL");
+  parser.addFlag("pause",
+      abbr: "y", help: "是否等待", defaultsTo: true, negatable: true);
+  parser.addFlag("help", abbr: "h", defaultsTo: false, hide: true,
+      callback: (help) {
+    if (help) {
+      print("""
+${parser.usage}
+    """);
+    }
+  });
+
+  ArgResults result = parser.parse(arguments);
+  if (result['help']) {
+  } else {
+    printWelcome();
+    start(result);
+  }
 }
 
 void printWelcome() {
@@ -24,14 +44,22 @@ void printWelcome() {
   print("否则请至开源地址携带报错信息进行反馈: $gitUrl");
 }
 
-Future<void> start() async {
+Future<void> start(ArgResults arguments) async {
   print("");
-  int id = readNovelId();
+  int? id;
+
+  if (arguments['id'] == null && arguments['url'] == null) {
+    print("请输入ID或URL:");
+    id = readNovelId(stdin.readLineSync());
+  } else {
+    id = readNovelId(arguments['id'] ?? arguments['url']);
+  }
+
   Novel novel = await bili_http.getNovel(id);
   print("");
   printNovel(novel);
   Catalog catalog = await bili_http.getCatalog(id);
-  pause();
+  if (arguments['pause'] == true) pause();
   PackerCallback callback = ConsoleCallback();
   for (Volume volume in catalog.volumes) {
     String dest = getDest(novel, volume);
@@ -48,9 +76,7 @@ Future<void> start() async {
   exit(0);
 }
 
-int readNovelId() {
-  print("请输入ID或URL:");
-  String? line = stdin.readLineSync();
+int readNovelId(String? line) {
   if (line == null) {
     throw "输入内容不能为空";
   }
@@ -84,7 +110,7 @@ void printNovel(Novel novel) {
 String getDest(Novel novel, Volume volume) {
   String name = ensureFileName(novel.title);
   String epub = ensureFileName("$name ${volume.name}.epub");
-  return "$name\\$epub";
+  return "out$separator$name$separator$epub";
 }
 
 String ensureFileName(String name) {
