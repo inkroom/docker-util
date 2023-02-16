@@ -4,3 +4,10 @@
 
 核心代码来自 [cfa](https://github.com/Kr328/ClashForAndroid)
 
+
+使用方法 
+
+```shell
+docker run -it --rm -v /clashConfig:/clash/out ghir.io/inkroom/clash_config url
+```
+
