@@ -44,3 +44,12 @@ dart compile exe bin/main.dart -o ./build/bili_novel_packer
 
 ## 和原仓库相比修改了部分代码 （inkbox）
 
+
+## docker执行方法
+
+```shell
+
+docker run -it --rm ghcr.io/inkroom/novel_packer -i id --no-pause
+```
+
+
