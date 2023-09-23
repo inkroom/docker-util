@@ -1,23 +1,54 @@
-# 哔哩轻小说打包器
+<h1 align="center">轻小说打包器</h1>
+
+<p align="center">
+    <img alt="GitHub" src="https://img.shields.io/github/license/Montaro2017/bili_novel_packer">
+    <img alt="Static Badge" src="https://img.shields.io/badge/language-Dart-britness">
+    <a href='https://gitee.com/Montaro2017/bili_novel_packer/'><img src='https://gitee.com/Montaro2017/bili_novel_packer/badge/star.svg?theme=dark' alt='star'></img></a>
+    <a target="_blank" href='https://github.com/Montaro2017/bili_novel_packer'>
+		<img src="https://img.shields.io/github/stars/Montaro2017/bili_novel_packer?logo=GitHub" alt="github star"/>
+	</a>
+</p>
+
+<p align="center">
+    <a href="https://gitee.com/Montaro2017/bili_novel_packer">Gitee</a> / <a href="https://github.com/Montaro2017/bili_novel_packer">GitHub</a>
+</p>
+
+<hr/>
 
 ## 介绍
 
-本项目用于从[哔哩轻小说](https://www.linovelib.com)网站下载小说并打包成EPUB
+轻小说打包器，可以将支持的轻小说网站中的小说打包成EPUB格式，包含插图和目录。
 
-输入URL或ID即可自动下载并打包成EPUB格式，支持封面、插图以及目录！
-
-**相比Java版打包速度可达10倍以上，同时不需要安装任何环境可直接运行！** 
+### 目前支持的轻小说网站
+ - [哔哩轻小说](https://www.linovelib.com)
+ - [轻小说文库](https://www.wenku8.net/login.php)
+ - 如果你希望添加其他网站支持，请提Issue
 
 ## 下载
 
-[点此下载](https://gitee.com/Montaro2017/bili_novel_packer/releases)
+[国内Gitee](https://gitee.com/Montaro2017/bili_novel_packer/releases) / [国外GitHub](https://github.com/Montaro2017/bili_novel_packer/releases)
 
 ## 使用
 双击exe或者使用命令提示符都可。
 
-![01](./images/1.bmp)
+![01](./images/img.png)
 
-![02](./images/2.bmp)
+![02](./images/img_1.png)
+
+
+### 多看阅读
+
+**多看阅读插图支持交互模式，点击可全屏查看**
+
+![DuoKan-1](./images/duokan-1.jpg)
+
+![DuoKan-2](./images/duokan-2.jpg)
+
+![DuoKan-3](./images/duokan-3.jpg)
+
+### Koodo Reader
+
+![Koodo-1](./images/koodo-1.png)
 
 ## 编译
 
@@ -51,5 +82,4 @@ dart compile exe bin/main.dart -o ./build/bili_novel_packer
 
 docker run -it --rm ghcr.io/inkroom/novel_packer -i id --no-pause
 ```
-
 

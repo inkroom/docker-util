@@ -1,25 +1,26 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:uuid/uuid.dart';
-import 'package:archive/archive_io.dart';
-import 'package:path/path.dart' as path;
 
-import 'package:bili_novel_packer/epub_packer/epub_opf.dart';
+import 'package:archive/archive_io.dart';
 import 'package:bili_novel_packer/epub_packer/epub_constant.dart';
 import 'package:bili_novel_packer/epub_packer/epub_navigator.dart';
-
+import 'package:bili_novel_packer/epub_packer/epub_opf.dart';
 import 'package:bili_novel_packer/media_type.dart' as epub_media_type;
+import 'package:path/path.dart' as path;
+import 'package:uuid/uuid.dart';
 
 class EpubPacker {
   final String epubFilePath;
-  final ZipFileEncoder _zip = ZipFileEncoder();
-  final Utf8Encoder _converter = Utf8Encoder();
+
+  static const Utf8Encoder _utf8Encoder = Utf8Encoder();
 
   // toc.ncx
   final EpubNavigator _navigator = EpubNavigator();
 
   // content.opf
   final EpubOpenPackageFormat _opf = EpubOpenPackageFormat();
+
+  final List<ArchiveFile> archiveFiles = [];
 
   String get docTitle => _navigator.docTitle;
 
@@ -43,21 +44,25 @@ class EpubPacker {
 
   set cover(String? id) => _opf.cover = id;
 
-  /// [epubFilePath] EPUB文件路径，实例化后文件就会被创建
-  /// [bookUuid] 将被初始化
-  EpubPacker(this.epubFilePath) {
-    _zip.create(epubFilePath);
-    _zip.addArchiveFile(mimetype);
-    _zip.addArchiveFile(container);
-    bookUuid = Uuid().v1();
-  }
+  EpubPacker(this.epubFilePath);
 
   /// 向EPUB中添加文件
   /// [archiveFile] 要添加的文件
   /// 注意：如果文件内容包含中文 需要使用Utf8Encoder()对内容进行编码
   /// 否则会出现乱码问题
   void addArchiveFile(ArchiveFile archiveFile) {
-    _zip.addArchiveFile(archiveFile);
+    if (!_existArchiveFile(archiveFile)) {
+      archiveFiles.add(archiveFile);
+    }
+  }
+
+  bool _existArchiveFile(ArchiveFile file) {
+    for (var archiveFile in archiveFiles) {
+      if (archiveFile.name == file.name) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// 添加章节文件
@@ -76,8 +81,8 @@ class EpubPacker {
     // 相对于toc和opf文件的路径
     String href = path.relative(name, from: "OEBPS");
     id ??= href;
-    Uint8List utf8Uint8List = _converter.convert(chapterContent);
-    _zip.addArchiveFile(
+    Uint8List utf8Uint8List = _utf8Encoder.convert(chapterContent);
+    addArchiveFile(
       ArchiveFile(name, utf8Uint8List.length, utf8Uint8List),
     );
     _opf.addChapter(
@@ -99,17 +104,20 @@ class EpubPacker {
   }) {
     String href = path.relative(name, from: "OEBPS");
     id ??= href;
-    _zip.addArchiveFile(
+    addArchiveFile(
       ArchiveFile(name, data.length, data),
     );
     _opf.addImage(ManifestItem(id, href, mediaType));
   }
 
-  /// 在打包前需要添加content.opf和toc.ncx文件
-  void _beforePack() {
-    Uint8List ncxUint8List = _converter.convert(
+  /// 执行打包操作
+  void pack() {
+    bookUuid = Uuid().v1();
+    Uint8List ncxUint8List = _utf8Encoder.convert(
       _navigator.build().toXmlString(pretty: true),
     );
+
+    /// 在打包前需要添加content.opf和toc.ncx文件
     addArchiveFile(
       ArchiveFile(
         "OEBPS/toc.ncx",
@@ -117,7 +125,7 @@ class EpubPacker {
         ncxUint8List,
       ),
     );
-    Uint8List opfUint8List = _converter.convert(
+    Uint8List opfUint8List = _utf8Encoder.convert(
       _opf.build().toXmlString(pretty: true),
     );
     addArchiveFile(
@@ -127,11 +135,13 @@ class EpubPacker {
         opfUint8List,
       ),
     );
-  }
-
-  /// 执行打包操作
-  void pack() {
-    _beforePack();
-    _zip.close();
+    addArchiveFile(container);
+    addArchiveFile(mimetype);
+    final ZipFileEncoder zip = ZipFileEncoder();
+    zip.create(epubFilePath);
+    for (var archiveFile in archiveFiles) {
+      zip.addArchiveFile(archiveFile);
+    }
+    zip.close();
   }
 }
