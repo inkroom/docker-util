@@ -6,6 +6,7 @@ import 'package:bili_novel_packer/light_novel/wenku_novel/wenku_novel.dart';
 import 'package:bili_novel_packer/util/html_util.dart';
 import 'package:bili_novel_packer/util/http_util.dart';
 import 'package:bili_novel_packer/util/url_util.dart';
+import 'package:console/console.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart';
 
@@ -26,14 +27,13 @@ class WenkuNovelSource implements LightNovelSource {
     var doc = parse(await HttpUtil.getStringFromGbk("$domain/book/$id.htm"));
 
     novel.id = id.toString();
-    novel.title = doc.querySelector("#content table:nth-child(1) span b")!.text;
+    novel.title = doc.querySelectorAll("#content b")[0].text;
     novel.coverUrl =
         doc.querySelector("#content table img")!.attributes["src"]!;
     List<Element> details = doc
-        .querySelector("#content table:nth-child(1) tr:nth-child(2)")!
-        .querySelectorAll("td");
-    novel.status = details[2].text.replaceFirst("文章状态：", "");
-    novel.author = details[1].text.replaceFirst("小说作者：", "");
+        .querySelectorAll("#content td");
+    novel.status = details[5].text.replaceFirst("文章状态：", "");
+    novel.author = details[4].text.replaceFirst("小说作者：", "");
 
     Element td =
         doc.querySelectorAll("#content table")[2].querySelectorAll("td")[1];
