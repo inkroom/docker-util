@@ -52,7 +52,7 @@ class NovelPacker {
       // TODO
     } else {
       for (var volume in arg.packVolumes) {
-        await _packVolume(volume, arg.addChapterTitle, callback);
+        await _packVolume(volume, arg.out, arg.addChapterTitle, callback);
       }
       exit(0);
     }
@@ -60,11 +60,12 @@ class NovelPacker {
 
   Future<void> _packVolume(
     Volume volume,
+    String? out,
     bool addChapterTitle, [
     PackCallback? callback,
   ]) async {
     callback?.beforePackVolume(volume);
-    EpubPacker packer = EpubPacker(_getEpubName(volume));
+    EpubPacker packer = EpubPacker(_getEpubName(out, volume));
     packer.docTitle = "${volume.catalog.novel.title} ${volume.volumeName}";
     packer.creator = volume.catalog.novel.author;
     List<Future<MapEntry<Chapter, Document>>> chapterFutures = [];
@@ -161,13 +162,13 @@ class NovelPacker {
     return MapEntry("OEBPS/$href", data);
   }
 
-  String _getEpubName(Volume volume) {
+  String _getEpubName(String? dir, Volume volume) {
     String title = _sanitizeFileName(volume.catalog.novel.title).trim();
     String volumeName = _sanitizeFileName(volume.volumeName).trim();
     if (volumeName == "") {
-      return "$title${Platform.pathSeparator}$title.epub";
+      return "${dir ?? ""}$title${Platform.pathSeparator}$title.epub";
     }
-    return "$title${Platform.pathSeparator}$title $volumeName.epub";
+    return "${dir ?? ""}$title${Platform.pathSeparator}$title $volumeName.epub";
   }
 
   String _sanitizeFileName(String name) {

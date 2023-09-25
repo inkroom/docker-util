@@ -29,6 +29,7 @@ void start(List<String> args) async {
   parser.addOption("url", abbr: "u", help: "书籍URL");
   parser.addOption("catalog",
       abbr: "c", help: "下载卷，如2,5，默认全下载", defaultsTo: "0");
+  parser.addOption("dir", abbr: "d", help: "输出目录");
   parser.addFlag("title",
       abbr: "t", help: "是否为每章添加标题", negatable: true, defaultsTo: true);
   parser.addFlag("help", abbr: "h", defaultsTo: false, hide: true,
@@ -56,7 +57,15 @@ ${parser.usage}
     arg.packVolumes = selectVolume(catalog, result['catalog']?.toString());
   }
   arg.addChapterTitle = result['title'];
+  arg.out = result['dir'] ?? arg.out;
+  dir(arg);
   packer.pack(arg, ConsolePackCallback());
+}
+
+void dir(PackArgument arg) {
+  if (arg.out != null && !arg.out!.endsWith("/")) {
+    arg.out = "${arg.out}/";
+  }
 }
 
 String readUrl() {
