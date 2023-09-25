@@ -18,7 +18,7 @@ FROM scratch
 COPY --from=build /data/so/ /
 WORKDIR /
 VOLUME /data/out
-ENTRYPOINT ["/packer"]
+ENTRYPOINT ["/packer","-d","/data/out"]
 
-## docker run -it --rm packer -i id --no-pause
+## docker run -it --rm -v ./out:/data/out  packer -u [url]
 

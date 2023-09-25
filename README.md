@@ -75,11 +75,11 @@ dart compile exe bin/main.dart -o ./build/bili_novel_packer
 
 ## 和原仓库相比修改了部分代码 （inkbox）
 
+主要是支持命令行参数，而不是读取终端输入
 
 ## docker执行方法
 
 ```shell
-
-docker run -it --rm ghcr.io/inkroom/novel_packer -i id --no-pause
+docker run -it --rm -v ./out:/data/out ghcr.io/inkroom/novel_packer -u [url]
 ```
 
