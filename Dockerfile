@@ -15,6 +15,8 @@ RUN mkdir -p /data/so/lib/x86_64-linux-gnu && cd /data/so/ && mkdir lib64 \
 
 
 FROM scratch
+COPY --from=0 /etc/ssl /etc/ssl
+COPY --from=0 /usr/share/ca-certificates /usr/share/ca-certificates
 COPY --from=build /data/so/ /
 WORKDIR /
 VOLUME /data/out
