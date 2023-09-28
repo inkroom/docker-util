@@ -13,6 +13,6 @@ ENTRYPOINT ["/app/lib"]
 
 # -h 查看用法
 
-# docker run -v $PWD/out:/app/data
+# docker run -v $PWD/out:/app/data -v $PWD/temp:/app/temp 
 
 

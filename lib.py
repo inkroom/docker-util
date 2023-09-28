@@ -1,7 +1,8 @@
 from linovelib2epub.linovel import Linovelib2Epub
 import argparse
 import sys
-
+from pathlib import Path
+import os
 
 # warning!: must run within __main__ module guard due to process spawn issue.
 if __name__ == '__main__':
@@ -12,5 +13,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    linovelib_epub = Linovelib2Epub(book_id=args.id,divide_volume=args.divide,select_volume_mode=args.select,clean_artifacts=False,custom_style_chapter='h1{text-align: center;}h2{text-align: center;}')
+
+    if not os.path.exists('temp/images'):
+        os.makedirs('temp/images');
+    if not os.path.exists('temp/pickle'):
+        os.makedirs('temp/pickle');
+    linovelib_epub = Linovelib2Epub(book_id=args.id,divide_volume=args.divide,select_volume_mode=args.select,clean_artifacts=False,custom_style_chapter='h1{text-align: center;}h2{text-align: center;}',image_download_folder='temp/images',pickle_temp_folder='temp/pickle')
     linovelib_epub.run()
