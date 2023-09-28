@@ -1,0 +1,45 @@
+name: docker
+
+on:
+  push:
+   branches: ['novel_down_python']
+
+   paths-ignore:
+    - 'README.md'
+  workflow_dispatch:
+  
+jobs:
+ build:
+   runs-on: ubuntu-latest
+   permissions:
+     contents: read
+     packages: write
+
+   steps:
+     - name: Checkout repository
+       uses: actions/checkout@v3
+
+     - name: Log in to the Container registry
+       uses: docker/login-action@v2
+       with:
+         registry: ghcr.io
+         username: ${{ github.repository_owner }}
+         password: ${{ secrets.GITHUB_TOKEN }}
+
+     - name: Extract metadata (tags, labels) for Docker
+       id: meta
+       uses: docker/metadata-action@v5
+       with:
+         images: ghcr.io/${{ github.repository_owner }}/novel_packer
+         tags: |
+            type=sha,prefix=python-sha-
+            type=raw,value=python,enable=true
+
+     - name: Build and push Docker image
+       uses: docker/build-push-action@v4
+       with:
+         context: .
+         push: true
+         tags: ${{ steps.meta.outputs.tags }}
+         labels: ${{ steps.meta.outputs.labels }}
+         github-token: ${{ secrets.GITHUB_TOKEN }}
