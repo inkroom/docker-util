@@ -1,20 +1,23 @@
-FROM python:alpine3.16
-
-RUN mkdir -p /light/data
-
-WORKDIR /light
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories
-RUN apk add nodejs && apk add npm && npm --registry https://registry.npm.taobao.org install node-mailer
-
-COPY requirement.txt /light/requirement.txt
-RUN cd /light && pip3 install -r requirement.txt -i https://mirrors.aliyun.com/pypi/simple
+FROM python:3.11.3-alpine as build
+WORKDIR /app
+RUN mkdir /plib && cd /plib && sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && apk add git && git clone https://github.moeyy.xyz/https://github.com/lightnovel-center/linovelib2epub.git && cd linovelib2epub && git checkout d2fe53283c5e3adf3dd55fa04239a1158fc479d4
+COPY modify/ /plib/linovelib2epub/
+RUN cd /plib && cd linovelib2epub && python3 -m venv venv && chmod +x ./venv/bin/activate && ./venv/bin/activate && python3 -m pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple && python3 -m pip install -e . -i https://mirrors.aliyun.com/pypi/simple && pip3 install argparse -i https://mirrors.aliyun.com/pypi/simple
+COPY lib.py /app/lib.py
+RUN pip3 install pyinstaller -i https://mirrors.aliyun.com/pypi/simple && apk add binutils && pyinstaller lib.py && cd /app/dist/lib && cp -r /usr/local/lib/python3.11/site-packages/fake_useragent ./_internal/ && mkdir _internal/linovelib2epub && cp -r /plib/linovelib2epub/src/linovelib2epub/styles  _internal/linovelib2epub
 
 
+FROM alpine
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && apk add tzdata \
+    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone
+COPY --from=build /app/dist/lib /app
+WORKDIR /app
+ENTRYPOINT ["/app/lib"]
 
-VOLUME /light/data
-COPY r.py /light/
-ENTRYPOINT ["python3","r.py"]
+# -h 查看用法
 
-## 执行命令 docker run -it --rm -v "/data/docker/书籍id:/light/data" ili-light id号 第二个参数随便传，可以实现不分卷输出
+# docker run -v $PWD/out:/app/data -v $PWD/temp:/app/temp -e uaa_token= -e uaa_cookie= -h
 
-## 可以使用 shell 函数 缩短命令
+
+
