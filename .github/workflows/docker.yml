@@ -24,7 +24,11 @@ jobs:
          registry: ghcr.io
          username: ${{ github.repository_owner }}
          password: ${{ secrets.GITHUB_TOKEN }}
-
+     - name: Date Tag
+       id: date
+       run: |
+         tag=$(date +%Y%m%d)
+         echo "date_tag=$tag" >> $GITHUB_OUTPUT
      - name: Extract metadata (tags, labels) for Docker
        id: meta
        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
@@ -33,6 +37,7 @@ jobs:
          tags: |
             type=sha
             type=raw,value=latest,enable=true
+            type=raw,value=${{ steps.date.outputs.date_tag }}
 
      - name: Build and push Docker image
        uses: docker/build-push-action@v4
@@ -42,4 +47,22 @@ jobs:
          tags: ${{ steps.meta.outputs.tags }}
          labels: ${{ steps.meta.outputs.labels }}
          github-token: ${{ secrets.GITHUB_TOKEN }}
+     - name: Extract metadata (tags, labels) for Docker
+       id: source
+       uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+       with:
+         images: ghcr.io/${{ github.repository_owner }}/clash_config
+         tags: |
+            type=raw,value=source,enable=true
+            type=raw,value=source-${{ steps.date.outputs.date_tag }}
+     - name: Build and push Docker image
+       uses: docker/build-push-action@v4
+       with:
+         context: .
+         file: Dockerfile.source
+         push: true
+         tags: ${{ steps.source.outputs.tags }}
+         labels: ${{ steps.source.outputs.labels }}
+         github-token: ${{ secrets.GITHUB_TOKEN }}
+ 
 

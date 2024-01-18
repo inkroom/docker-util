@@ -1,0 +1,5 @@
+FROM golang:1.21.6-alpine AS build
+WORKDIR /go/
+ADD ./clash.tar.gz /go/clash
+ADD ./clashForAndroid.tar.gz /go/android
+RUN apk add git && cd /go/ && git clone https://github.com/mokitoo/kr328-clash kr328-clash

@@ -1,7 +1,9 @@
-FROM golang:1.20.0-alpine3.16 AS build
+FROM golang:1.21.6-alpine AS build
 ADD . /go
 WORKDIR /go/cla
-RUN apk add git && cd /go/cla/ && rm -rf clash && git clone https://github.com/Kr328/clash.git clash && go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct && go get && go build -ldflags="-s -w" main.go && chmod +x main
+#ADD ./clash.tar.gz /go/cla/clash
+#RUN go get -u  github.com/kr328/clash
+RUN apk add git && cd /go/cla/ && rm -rf clash && git clone https://github.com/mokitoo/kr328-clash clash  && go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct && go get && go build -ldflags="-s -w" main.go && chmod +x main
 
 
 FROM alpine
