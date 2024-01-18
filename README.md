@@ -2,7 +2,7 @@
 
 用于将订阅的clash url转换成配置文件。
 
-核心代码来自 [cfa](https://github.com/Kr328/ClashForAndroid)
+核心代码来自 [cfa](https://opensource.clash.wiki/Kr328/ClashForAndroid/)
 
 
 使用方法 
