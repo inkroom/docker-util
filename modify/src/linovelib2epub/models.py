@@ -29,7 +29,6 @@ class LinovelibMobileImageDuplicateCheckingStrategy(ImageDuplicateCheckingStrate
 class MasiroImageDuplicateCheckingStrategy(ImageDuplicateCheckingStrategy):
 
     def is_duplicate(self, url_1, url_2):
-        # 完全一致，才被认为是重复
         return url_1 == url_2
 
 
@@ -46,6 +45,8 @@ class ImageDuplicationChecker:
     def is_duplicate(self, url_1, url_2):
         return self.duplicate_checking_strategy.is_duplicate(url_1, url_2)
 
+
+# TODO add basic info model
 
 @dataclass
 class CatalogBaseChapter:
@@ -120,19 +121,16 @@ class CatalogLinovelibMobileVolume(CatalogBaseVolume):
 
 @dataclass
 class LightNovelImage:
-    # example: http://example.com no path, host only
-    site_base_url: str = ''
-
     # 这个图片从属 html 页面的原始地址
-    # 这个字段用于处理 src 为相对路径的情况，目前还没有使用。
+    # 这个字段用于将来处理 remote_src 为相对路径 e.g.`./sub_folder/2.jpg` 的情况。
     related_page_url: str = ""
 
     # relative url format or full url format
     # example:
     # - http://example.com/path/to/1.jpg => PASS
     # - /path/2.jpg(relative to website root) => ADD hostname
-    # - //i0.hdslb.com/bfs/archive/aaa.png(no network protocol) => ADD protocol https or http ?
-    # - ./sub_folder/2.jpg(relative to current folder) or ../ or ../../ etc. => not implement yet now.
+    # - //i0.hdslb.com/bfs/archive/aaa.png(no network protocol) => ADD protocol https
+    # - ./sub_folder/2.jpg(relative to current url path) or ../ or ../../ etc. => not implement yet now.
     remote_src: str = ''
 
     chapter_id: int | str | None = None
@@ -147,7 +145,11 @@ class LightNovelImage:
     latest_update_chapterId: str = ''
     description: str = ''
 
-
+    @property
+    def site_base_url(self):
+        # https://w.linovelib.com/novel/3279/167340.html => https://w.linovelib.com
+        parsed_url = urlparse(self.related_page_url)
+        return parsed_url.scheme + "://" + parsed_url.hostname
     @property
     def hostname(self):
         u = urllib.parse.urlsplit(self.site_base_url)
@@ -156,11 +158,13 @@ class LightNovelImage:
     @property
     def download_url(self):
         # computed property from url_prefix and remote_src
+        # future: handle ./sub_folder/2.jpg with related_page_url
         if self.remote_src.startswith("/"):
             full_url = f'{self.site_base_url}{self.remote_src}'
         elif self.remote_src.startswith("//"):
             full_url = f'https:{self.remote_src}'
         else:
+            # fallback to identity
             full_url = self.remote_src
         return full_url
 
@@ -211,6 +215,9 @@ class LightNovelVolume:
             return hostname_to_strategy.get(hostname, ImageDuplicateCheckingStrategy)
 
         return ImageDuplicateCheckingStrategy
+
+    # def set_chapter_list(self,chapters: List[LightNovelChapter]) -> None:
+    #     self.chapters = chapters;
 
     def get_illustrations(self) -> List:
         """
@@ -263,8 +270,9 @@ class LightNovel:
     update_time: str = ''
     latest_update_chapterId: str = ''
 
+    finished: bool = False
 
-
+    catalog_list: List[CatalogLinovelibMobileVolume] = None
     # status flags
     basic_info_ready: bool = False
     volumes_content_ready: bool = False
@@ -296,8 +304,20 @@ class LightNovel:
         new_volume: LightNovelVolume = LightNovelVolume(vid, title, chapters)
         self.volumes.append(new_volume)
 
+    def add_new_volume(self,new_volume:LightNovelVolume) -> LightNovelVolume:
+        length =len(self.volumes);
+        if length!=0:
+            if self.volumes[length - 1].volume_id != new_volume.volume_id:
+                self.volumes.append(new_volume)
+                return new_volume
+            return self.volumes[length - 1]
+        else:
+            self.volumes.append(new_volume)
+            return new_volume
+
     def mark_basic_info_ready(self) -> None:
         self.basic_info_ready = True
 
     def mark_volumes_content_ready(self) -> None:
         self.volumes_content_ready = True
+

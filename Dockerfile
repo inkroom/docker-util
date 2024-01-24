@@ -1,6 +1,6 @@
 FROM python:3.11.3-alpine as build
 WORKDIR /app
-RUN mkdir /plib && cd /plib && sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && apk add git && git clone https://github.moeyy.xyz/https://github.com/lightnovel-center/linovelib2epub.git && cd linovelib2epub && git checkout d2fe53283c5e3adf3dd55fa04239a1158fc479d4
+RUN mkdir /plib && cd /plib && sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && apk add gcc g++ git jpeg jpeg-dev zlib zlib-dev && git clone https://github.com/lightnovel-center/linovelib2epub.git && cd linovelib2epub && git checkout d5885af
 COPY modify/ /plib/linovelib2epub/
 RUN cd /plib && cd linovelib2epub && python3 -m venv venv && chmod +x ./venv/bin/activate && ./venv/bin/activate && python3 -m pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple && python3 -m pip install -e . -i https://mirrors.aliyun.com/pypi/simple && pip3 install argparse -i https://mirrors.aliyun.com/pypi/simple
 COPY lib.py /app/lib.py

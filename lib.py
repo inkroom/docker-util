@@ -1,4 +1,4 @@
-from linovelib2epub.linovel import Linovelib2Epub,TargetSite
+from linovelib2epub import Linovelib2Epub, TargetSite
 import argparse
 import sys
 from pathlib import Path
@@ -45,5 +45,5 @@ if __name__ == '__main__':
         os.makedirs('temp/images');
     if not os.path.exists('temp/pickle'):
         os.makedirs('temp/pickle');
-    linovelib_epub = Linovelib2Epub(book_id=args.id,target_site=get_site(args.site), divide_volume=args.divide,has_illustration=False,select_volume_mode=args.select,clean_artifacts=False,custom_style_chapter='h1{text-align: center;}h2{text-align: center;}',image_download_folder='temp/images',pickle_temp_folder='temp/pickle',load_pickle=args.load)
+    linovelib_epub = Linovelib2Epub(book_id=args.id,target_site=get_site(args.site), divide_volume=args.divide,has_illustration=True,select_volume_mode=args.select,clean_artifacts=False,custom_style_chapter='h1{text-align: center;}h2{text-align: center;}',image_download_folder='temp/images',pickle_temp_folder='temp/pickle',load_pickle=args.load)
     linovelib_epub.run()

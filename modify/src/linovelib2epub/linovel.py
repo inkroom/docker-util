@@ -7,7 +7,7 @@ import urllib.parse
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Union, Dict, Any, List, cast
-
+import traceback
 import uuid
 from PIL import Image
 from ebooklib import epub
@@ -47,13 +47,13 @@ class EpubWriter:
         cover_file = self.epub_settings["image_download_folder"] + "/" + novel.book_cover.local_relative_path
 
         if not self.epub_settings["divide_volume"]:
-            self._write_epub(novel.bid, book_title, author, novel.volumes, cover_file,desc=novel.description,updateTime=novel.update_time,latest_update_chapterId=novel.latest_update_chapterId)
+            self._write_epub(novel.book_id, book_title, author, novel.volumes, cover_file,desc=novel.description,updateTime=novel.update_time,latest_update_chapterId=novel.latest_update_chapterId)
         else:
             for volume in novel.volumes:
                 # if volume image folder is not empty, then use the first image as the cover
                 if volume.volume_cover:
-                    cover_file = f'{self.epub_settings["image_download_folder"]}/{volume.volume_cover}'
-                self._write_epub(novel.bid, f'{book_title}_{volume.title}', author, volume, cover_file,desc=novel.description,updateTime=novel.update_time,latest_update_chapterId=novel.latest_update_chapterId)
+                    cover_file = f'{self.epub_settings["image_download_folder"]}/{volume.volume_cover.local_relative_path}'
+                self._write_epub(novel.book_id, f'{book_title}_{volume.title}', author, volume, cover_file,desc=novel.description,updateTime=novel.update_time,latest_update_chapterId=novel.latest_update_chapterId)
 
         # tips: show output file folder
         output_folder = os.path.join(os.getcwd(), self._get_output_folder())
@@ -342,7 +342,7 @@ class Linovelib2Epub:
         self.target_site = target_site
 
         site_to_base_url = {
-            TargetSite.LINOVELIB_MOBILE: 'https://w.linovelib.com',
+            TargetSite.LINOVELIB_MOBILE: 'https://www.bilinovel.com',
             TargetSite.MASIRO: 'https://masiro.me',
             TargetSite.WENKU8: 'https://www.wenku8.net',
         }
@@ -413,9 +413,16 @@ class Linovelib2Epub:
             else:
                 self.logger.info("pickle exists but not load and remove it")
                 os.remove(novel_pickle_path)
-                novel = self._spider.fetch()
+                novel = LightNovel()
         else:
-            novel = self._spider.fetch()
+            novel = LightNovel()
+        if novel.finished == False:
+            try:
+                novel = self._spider.fetch(novel)
+            except Exception as e:
+                self._spider.save_novel_pickle(novel);
+                self.logger.info(f'FAIL: {e}')
+                return
 
         if novel:
             # 2.solve images download and save novel pickle
@@ -441,3 +448,4 @@ class Linovelib2Epub:
                 os.remove(novel_pickle_path)
             except (Exception,):
                 pass
+
