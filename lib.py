@@ -31,6 +31,8 @@ if __name__ == '__main__':
     parser.add_argument('-d','--divide',help="分卷",default=False,action="store_true")
     parser.add_argument('-l','--load',help="加载pickle",default=False,action="store_true")
     parser.add_argument('-f','--site',help="来源",default='linovelib_mobile',choices=from_choices)
+    parser.add_argument('-w','--date',help="输出文件夹附带日志",default=False,action="store_true")
+
 
 
     args = parser.parse_args()
@@ -45,5 +47,5 @@ if __name__ == '__main__':
         os.makedirs('temp/images');
     if not os.path.exists('temp/pickle'):
         os.makedirs('temp/pickle');
-    linovelib_epub = Linovelib2Epub(book_id=args.id,target_site=get_site(args.site), divide_volume=args.divide,has_illustration=True,select_volume_mode=args.select,clean_artifacts=False,custom_style_chapter='h1{text-align: center;}h2{text-align: center;}',image_download_folder='temp/images',pickle_temp_folder='temp/pickle',load_pickle=args.load)
+    linovelib_epub = Linovelib2Epub(book_id=args.id,target_site=get_site(args.site), divide_volume=args.divide,has_illustration=True,select_volume_mode=args.select,clean_artifacts=False,custom_style_chapter='h1{text-align: center;}h2{text-align: center;}',image_download_folder='temp/images',pickle_temp_folder='temp/pickle',load_pickle=args.load,with_date=args.date)
     linovelib_epub.run()
