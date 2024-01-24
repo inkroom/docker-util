@@ -42,10 +42,11 @@ if __name__ == '__main__':
             if color.value == site:
                 return color
 
-
-    if not os.path.exists('temp/images'):
-        os.makedirs('temp/images');
-    if not os.path.exists('temp/pickle'):
-        os.makedirs('temp/pickle');
-    linovelib_epub = Linovelib2Epub(book_id=args.id,target_site=get_site(args.site), divide_volume=args.divide,has_illustration=True,select_volume_mode=args.select,clean_artifacts=False,custom_style_chapter='h1{text-align: center;}h2{text-align: center;}',image_download_folder='temp/images',pickle_temp_folder='temp/pickle',load_pickle=args.load,with_date=args.date)
+    image_folder = 'temp/' + str(args.id) + '/images'
+    pickle_folder = 'temp/' + str(args.id) +'/pickle'
+    if not os.path.exists(image_folder):
+        os.makedirs(image_folder);
+    if not os.path.exists(pickle_folder):
+        os.makedirs(pickle_folder);
+    linovelib_epub = Linovelib2Epub(book_id=args.id,target_site=get_site(args.site), divide_volume=args.divide,has_illustration=True,select_volume_mode=args.select,clean_artifacts=False,custom_style_chapter='h1{text-align: center;}h2{text-align: center;}',image_download_folder=image_folder,pickle_temp_folder=pickle_folder,load_pickle=args.load,with_date=args.date)
     linovelib_epub.run()
