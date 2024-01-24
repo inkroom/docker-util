@@ -258,9 +258,9 @@ class EpubWriter:
     def _get_output_folder(self) -> str:
         if self.epub_settings["with_date"]:
             dt = datetime.now()
-            out_folder = 'data/' + dt.strftime('%Y-%m-%d')
+            out_folder = 'data/' + dt.strftime('%Y-%m-%d') + '/' + str(self.epub_settings["book_id"])
         else:
-            out_folder = 'data'
+            out_folder = 'data/' + str(self.epub_settings["book_id"])
         if not os.path.exists(out_folder):
             os.makedirs(out_folder)
         return out_folder
