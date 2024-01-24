@@ -212,7 +212,7 @@ class BaseNovelWebsiteSpider(ABC):
             self.logger.info(f"has_illustration = False, Only Download cover")
             image_list: List[LightNovelImage] = [novel.book_cover]
 
-        self.logger.info(f"len of image list: {len(image_list)} {image_list}")
+        self.logger.info(f"len of image list: {len(image_list)}")
 
         if is_async(_download_image):
             asyncio.run(_download_image(image_list))
