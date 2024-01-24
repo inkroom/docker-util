@@ -14,7 +14,7 @@ from ebooklib import epub
 from ebooklib.epub import EpubItem, EpubBook, EpubHtml
 from rich import print as rich_print
 from rich.prompt import Confirm
-
+from datetime import datetime
 from . import settings
 from .exceptions import LinovelibException
 from .logger import Logger
@@ -256,7 +256,11 @@ class EpubWriter:
             _add_image(images_folder, illustration)
 
     def _get_output_folder(self) -> str:
-        out_folder = 'data'
+        if self.epub_settings["with_date"]:
+            dt = datetime.now()
+            out_folder = 'data/' + dt.strftime('%Y-%m-%d')
+        else:
+            out_folder = 'data'
         if not os.path.exists(out_folder):
             os.makedirs(out_folder)
         return out_folder
@@ -335,6 +339,7 @@ class Linovelib2Epub:
                  disable_proxy: bool = settings.DISABLE_PROXY,
                  image_download_strategy: str = ASYNCIO,
                  load_pickle: bool = settings.LOAD_PICKLE,
+                 with_date:bool=True
                  ):
         if book_id is None:
             raise LinovelibException('book_id parameter must be set.')
@@ -368,6 +373,7 @@ class Linovelib2Epub:
             'select_volume_mode': select_volume_mode,
             'log_filename': run_identifier,
             'load_pickle': load_pickle,
+            'with_date': with_date,
         }
 
         self.spider_settings = {
@@ -422,6 +428,7 @@ class Linovelib2Epub:
             except Exception as e:
                 self._spider.save_novel_pickle(novel);
                 self.logger.info(f'FAIL: {e}')
+                e.print_exc()
                 return
 
         if novel:
