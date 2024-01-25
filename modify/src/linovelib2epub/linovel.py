@@ -24,7 +24,7 @@ from .spider.masiro_spider import MasiroSpider
 from .spider.wenku8_spider import Wenku8Spider
 from .utils import (create_folder_if_not_exists, random_useragent,
                     read_pkg_resource, sanitize_pathname)
-
+from functools import reduce
 
 class EpubWriter:
 
@@ -144,8 +144,8 @@ class EpubWriter:
                         """<div class="acontent" id="acontent">""", "")
 
                 write_content = write_content.replace('png', 'jpg')
-
-                page = epub.EpubHtml(title=chapter_title, file_name=f"{file_index}.xhtml", lang="zh")
+                file_name = "%04d.xhtml" %file_index
+                page = epub.EpubHtml(title=chapter_title, file_name=file_name, lang="zh")
                 page.set_content(write_content)
 
                 # add `<link>` tag to page `<head>` section.
@@ -156,7 +156,7 @@ class EpubWriter:
                     book.toc[chapter_index][1].append(page)
                 else:
                     # chapter_title as h1
-                    book.toc.append(epub.Link(f"{file_index}.xhtml", chapter_title, str(uuid.uuid4())))
+                    book.toc.append(epub.Link(file_name, chapter_title, str(uuid.uuid4())))
 
                 book.spine.append(page)
 
@@ -251,7 +251,7 @@ class EpubWriter:
                                 media_type="image/jpeg",
                                 content=data_img)
             book.add_item(img)
-
+        illustrations = reduce(lambda y,x:y if (x.local_relative_path in [i.local_relative_path for i in y]) else (lambda z,u:(z.append(u),z))(y,x)[1],illustrations,[])
         for illustration in illustrations:
             _add_image(images_folder, illustration)
 
