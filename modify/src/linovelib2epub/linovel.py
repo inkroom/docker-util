@@ -144,7 +144,7 @@ class EpubWriter:
                         """<div class="acontent" id="acontent">""", "")
 
                 write_content = write_content.replace('png', 'jpg')
-                file_name = "%04d.xhtml" %file_index
+                file_name = "%03d." % volume.volume_id + volume_title + "/%04d.xhtml" %file_index
                 page = epub.EpubHtml(title=chapter_title, file_name=file_name, lang="zh")
                 page.set_content(write_content)
 
@@ -221,9 +221,10 @@ class EpubWriter:
                         custom_style_chapter: EpubItem | None,
                         default_style_chapter: EpubItem | None,
                         page: EpubHtml) -> None:
-        page.add_item(default_style_chapter)
+        # 目录结构变了，所以路径也要改
+        page.add_link(href="../" + default_style_chapter.get_name(), rel="stylesheet", type="text/css")
         if custom_style_chapter:
-            page.add_item(custom_style_chapter)
+            page.add_link(href="../" + custom_style_chapter.get_name(), rel="stylesheet", type="text/css")
         book.add_item(page)
 
     def _add_images(self, book: EpubBook, images_folder: str, illustrations: List[LightNovelImage]) -> None:

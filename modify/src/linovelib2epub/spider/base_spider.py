@@ -218,6 +218,9 @@ class BaseNovelWebsiteSpider(ABC):
             asyncio.run(_download_image(image_list))
         else:
             _download_image(image_list)
+    def get_img_src(self, img: LightNovelImage) -> str:
+        # 由于 文章页上级还有 卷名目录，所以图片需要往前一级
+        return '../'+self.spider_settings["image_download_folder"] +'/'+img.local_relative_path
 
     def save_novel_pickle(self, novel):
         create_folder_if_not_exists(self.spider_settings["pickle_temp_folder"])
@@ -406,4 +409,3 @@ class BaseNovelWebsiteSpider(ABC):
         :return:
         """
         return page
-

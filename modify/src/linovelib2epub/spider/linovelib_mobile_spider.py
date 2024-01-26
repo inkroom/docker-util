@@ -35,19 +35,18 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
         default_referer = 'https://www.bilinovel.com'
         headers = {
             # 'Host': 'www.bilinovel.com'
-'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SAMSUNG-SM-T377A Build/NMF26X) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.216/217 Mobile Safari/537.36'
-,'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-,'Accept-Language': 'zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2'
-,'Accept-Encoding': 'gzip, deflate, br'
-,'DNT': '1'
-,'Referer': default_referer
-,'Cookie': 'night=0; cf_clearance=.V7au2_KmpRi2CskNew1Wb_5VSZu2mpn8kvca1qBPPo-1705986833-1-AXoxfY/qsKNcvQGUYx3giddyfFLHFJHpdCrDo4CwpDq15h0ec82E8HuPxiXbUfniiWo0LVUtcf/UdGgTsAH47lo=; jieqiRecentRead=2356.83534.0.5.1705986832.0'
-,'Upgrade-Insecure-Requests': '1'
-,'Sec-Fetch-Dest': 'document'
-,'Sec-Fetch-Mode': 'navigate'
-,'Sec-Fetch-Site': 'same-origin'
-,'Sec-Fetch-User': '?1'
-,'TE': 'trailers'
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SAMSUNG-SM-T377A Build/NMF26X) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.216/217 Mobile Safari/537.36'
+            ,'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+            ,'Accept-Language': 'zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2'
+            ,'Accept-Encoding': 'gzip, deflate, br'
+            ,'DNT': '1'
+            ,'Referer': default_referer
+            ,'Upgrade-Insecure-Requests': '1'
+            ,'Sec-Fetch-Dest': 'document'
+            ,'Sec-Fetch-Mode': 'navigate'
+            ,'Sec-Fetch-Site': 'same-origin'
+            ,'Sec-Fetch-User': '?1'
+            ,'TE': 'trailers'
         }
         return headers
 
@@ -247,9 +246,10 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
                                                                 chapter_id=chapter_id, volume_id=volume_id,
                                                                 book_id=self.spider_settings["book_id"])
 
-                            image_local_src = f'{self.spider_settings["image_download_folder"]}/{light_novel_image.local_relative_path}'
+                            image_local_src = self.get_img_src(light_novel_image)
                             local_image = str(image).replace(str(html_image_src.group()), image_local_src)
                             article = article.replace(str(image), local_image)
+                            self.logger.info(f" im {image_local_src} ")
                             chapter_illustrations.append(light_novel_image)
 
                         article = _anti_js_obfuscation(article)
@@ -474,4 +474,3 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
         novel.mark_basic_info_ready()
 
         return novel
-
