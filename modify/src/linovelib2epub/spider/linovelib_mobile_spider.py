@@ -137,6 +137,10 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
             for anouncement in anouncements:
                 anouncement.decompose()
 
+            # 去除 ins 标签，html中使用的<ins></ins>会被ebooklib处理成 <ins /> 导致浏览器解析错误
+            anouncements = html_copy.select("ins")
+            for anouncement in anouncements:
+                anouncement.decompose()
             return re.sub(r'<script.+?</script>', '', str(html_copy), flags=re.DOTALL)
         if novel.catalog_list is None:
             try:
