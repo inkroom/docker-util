@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Iterable, Optional, Callable, Awaitable, Union, Dict, Any, List
-
+import json
 import aiofiles
 import aiohttp as aiohttp
 import requests
@@ -186,6 +186,19 @@ class BaseNovelWebsiteSpider(ABC):
     def post_fetch(self, novel: LightNovel) -> None:
         novel.finished = True
         self.save_novel_pickle(novel)
+
+
+        if len(self.spider_settings["new_title"]) != 0:
+            # 修改标题
+            new_title = json.loads(self.spider_settings["new_title"])
+            for v in novel.volumes:
+                for chap in v.chapters:
+                     if chap.title in new_title :
+                        chap.content = chap.content.replace(chap.title,new_title[chap.title])
+                        chap.title = new_title[chap.title]
+                        self.save_novel_pickle(novel)
+
+
 
         start = time.perf_counter()
         self._process_image_download(novel)

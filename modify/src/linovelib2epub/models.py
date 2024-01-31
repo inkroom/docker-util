@@ -306,14 +306,11 @@ class LightNovel:
 
     def add_new_volume(self,new_volume:LightNovelVolume) -> LightNovelVolume:
         length =len(self.volumes);
-        if length!=0:
-            if self.volumes[length - 1].volume_id != new_volume.volume_id:
-                self.volumes.append(new_volume)
-                return new_volume
-            return self.volumes[length - 1]
-        else:
-            self.volumes.append(new_volume)
-            return new_volume
+        for m in self.volumes:
+            if m.volume_id == new_volume.volume_id:
+                return m
+        self.volumes.append(new_volume)
+        return new_volume
 
     def mark_basic_info_ready(self) -> None:
         self.basic_info_ready = True

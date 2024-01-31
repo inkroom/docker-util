@@ -7,7 +7,6 @@ import urllib.parse
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Union, Dict, Any, List, cast
-import traceback
 import uuid
 from PIL import Image
 from ebooklib import epub
@@ -340,7 +339,8 @@ class Linovelib2Epub:
                  disable_proxy: bool = settings.DISABLE_PROXY,
                  image_download_strategy: str = ASYNCIO,
                  load_pickle: bool = settings.LOAD_PICKLE,
-                 with_date:bool=True
+                 with_date:bool=True,
+                 new_title: str = ''
                  ):
         if book_id is None:
             raise LinovelibException('book_id parameter must be set.')
@@ -384,7 +384,8 @@ class Linovelib2Epub:
             'http_retries': http_retries,
             'random_useragent': random_useragent(),
             'http_cookie': http_cookie,
-            'disable_proxy': disable_proxy
+            'disable_proxy': disable_proxy,
+            'new_title': new_title
         }
         site_to_spider = {
             TargetSite.LINOVELIB_MOBILE: LinovelibMobileSpider,
@@ -429,7 +430,6 @@ class Linovelib2Epub:
             except Exception as e:
                 self._spider.save_novel_pickle(novel);
                 self.logger.info(f'FAIL: {e}')
-                e.print_exc()
                 return
 
         if novel:
@@ -456,4 +456,3 @@ class Linovelib2Epub:
                 os.remove(novel_pickle_path)
             except (Exception,):
                 pass
-
