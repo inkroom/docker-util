@@ -21,7 +21,7 @@ from ..models import LightNovel, LightNovelImage, LightNovelVolume, LightNovelCh
     CatalogBaseVolume
 from ..utils import (check_image_integrity, create_folder_if_not_exists,
                      is_async, is_valid_image_url)
-
+from webdav4.client import Client
 # IMAGE_DOWNLOAD_STRATEGY
 MULTIPROCESSING = 'MULTIPROCESSING'
 MULTITHREADING = 'MULTITHREADING'
@@ -187,7 +187,6 @@ class BaseNovelWebsiteSpider(ABC):
         novel.finished = True
         self.save_novel_pickle(novel)
 
-
         if len(self.spider_settings["new_title"]) != 0:
             # 修改标题
             new_title = json.loads(self.spider_settings["new_title"])
@@ -198,6 +197,21 @@ class BaseNovelWebsiteSpider(ABC):
                         chap.title = new_title[chap.title]
                         self.save_novel_pickle(novel)
 
+
+        # 上传pickle文件
+        if len(self.spider_settings['webdav_host'])!=0:
+            webdav = Client(self.spider_settings['webdav_host'],auth=(self.spider_settings['webdav_username'],self.spider_settings['webdav_password']))
+            # webdav.mkdir('epub/'+self.spider_settings['novel_pickle_path'])
+
+            before=''
+            to_path=('epub/'+self.spider_settings['novel_pickle_path']).split('/')
+            for index in range(len(to_path)):
+                if index < len(to_path) - 1:
+                    before=before+to_path[index]+'/'
+                    webdav.mkdir(before)
+            # if webdav.exists('epub/'+self.spider_settings['novel_pickle_path']):
+            #     webdav.remove('epub/'+self.spider_settings['novel_pickle_path'])
+            webdav.upload_file(self.spider_settings['novel_pickle_path'], 'epub/'+self.spider_settings['novel_pickle_path'],overwrite=True)
 
 
         start = time.perf_counter()
