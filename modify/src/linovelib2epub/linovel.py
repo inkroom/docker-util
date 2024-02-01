@@ -24,7 +24,7 @@ from .spider.wenku8_spider import Wenku8Spider
 from .utils import (create_folder_if_not_exists, random_useragent,
                     read_pkg_resource, sanitize_pathname)
 from functools import reduce
-
+from webdav4.client import Client
 class EpubWriter:
 
     def __init__(self, epub_settings: Dict[str, Any]) -> None:
@@ -212,8 +212,17 @@ class EpubWriter:
         else:
             if volume.volume_id is not None:
                 prefix = "%02d." % int(volume.volume_id)
-
-        epub.write_epub((out_folder) + "/" + prefix + sanitize_pathname(title) + '.epub', book)
+        book_file_name = (out_folder) + "/" + prefix + sanitize_pathname(title) + '.epub'
+        epub.write_epub(book_file_name, book)
+        if len(self.epub_settings['webdav_host'])!=0:
+            webdav = Client(self.epub_settings['webdav_host'],auth=(self.epub_settings['webdav_username'],self.epub_settings['webdav_password']))   
+            before=''
+            to_path=('epub/'+book_file_name).split('/')
+            for index in range(len(to_path)):
+                if index < len(to_path) - 1:
+                    before=before+to_path[index]+'/'
+                    webdav.mkdir(before)          
+            webdav.upload_file(book_file_name, 'epub/'+book_file_name,overwrite=True)
 
     @staticmethod
     def _set_page_style(book: EpubBook,
@@ -340,7 +349,10 @@ class Linovelib2Epub:
                  image_download_strategy: str = ASYNCIO,
                  load_pickle: bool = settings.LOAD_PICKLE,
                  with_date:bool=True,
-                 new_title: str = ''
+                 new_title: str = '',
+                 webdav_host:str='',
+                 webdav_username:str='',
+                 webdav_password:str=''
                  ):
         if book_id is None:
             raise LinovelibException('book_id parameter must be set.')
@@ -375,6 +387,9 @@ class Linovelib2Epub:
             'log_filename': run_identifier,
             'load_pickle': load_pickle,
             'with_date': with_date,
+            'webdav_host':webdav_host,
+            'webdav_username' : webdav_username,
+            'webdav_password' : webdav_password
         }
 
         self.spider_settings = {
@@ -385,7 +400,10 @@ class Linovelib2Epub:
             'random_useragent': random_useragent(),
             'http_cookie': http_cookie,
             'disable_proxy': disable_proxy,
-            'new_title': new_title
+            'new_title': new_title,
+            'webdav_host':webdav_host,
+            'webdav_username' : webdav_username,
+            'webdav_password' : webdav_password
         }
         site_to_spider = {
             TargetSite.LINOVELIB_MOBILE: LinovelibMobileSpider,
@@ -430,6 +448,7 @@ class Linovelib2Epub:
             except Exception as e:
                 self._spider.save_novel_pickle(novel);
                 self.logger.info(f'FAIL: {e}')
+                e.print()
                 return
 
         if novel:
