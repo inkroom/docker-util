@@ -136,11 +136,11 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
             anouncements = html_copy.select(".ca1")
             for anouncement in anouncements:
                 anouncement.decompose()
-
             # 去除 ins 标签，html中使用的<ins></ins>会被ebooklib处理成 <ins /> 导致浏览器解析错误
             anouncements = html_copy.select("ins")
             for anouncement in anouncements:
                 anouncement.decompose()
+
             return re.sub(r'<script.+?</script>', '', str(html_copy), flags=re.DOTALL)
         if novel.catalog_list is None:
             try:
@@ -253,7 +253,6 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
                             image_local_src = self.get_img_src(light_novel_image)
                             local_image = str(image).replace(str(html_image_src.group()), image_local_src)
                             article = article.replace(str(image), local_image)
-                            self.logger.info(f" im {image_local_src} ")
                             chapter_illustrations.append(light_novel_image)
 
                         article = _anti_js_obfuscation(article)
@@ -369,8 +368,7 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
     def _convert_to_catalog_list(self, catalog_html) -> List[CatalogLinovelibMobileVolume]:
         soup_catalog = BeautifulSoup(catalog_html, 'lxml')
         # chapter_count = soup_catalog.find('h4', {'class': 'chapter-sub-title'}).find('output').text
-        catalog_wrapper = soup_catalog.find('ol', {'id': 'volumes'})
-        catalog_html_items = catalog_wrapper.children  # Use children to get both <h3> and <li> elements
+        catalog_html_items = soup_catalog.find_all('li')  # Use children to get both <h3> and <li> elements
 
         # catalog_html_lis is an array: [li, li, li, ...]
         # example format:
@@ -392,7 +390,7 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
             # is volume name
             if item.name == 'li' and 'chapter-bar' in item['class']:
                 _volume_index += 1
-                _current_volume_title = item.get_text()
+                _current_volume_title = item.find('h3').get_text()
                 _current_chapters: List[CatalogLinovelibMobileChapter] = []
                 new_volume = CatalogLinovelibMobileVolume(
                     vid=_volume_index,
@@ -409,7 +407,7 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
                     chapter_url=chapter_url
                 )
                 _current_chapters.append(new_chapter)
-
+        self.logger.info(f'item5  {item}')
         # sanitize catalog_list => remove volume that has empty chapters
         # https://w.linovelib.com/novel/3847/catalog
         # {'vid': 3, 'volume_title': '第四卷', 'chapters': []}
