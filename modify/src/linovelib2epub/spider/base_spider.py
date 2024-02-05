@@ -8,6 +8,7 @@ from multiprocessing import Pool
 from pathlib import Path
 from typing import Iterable, Optional, Callable, Awaitable, Union, Dict, Any, List
 import json
+
 import aiofiles
 import aiohttp as aiohttp
 import requests
@@ -20,7 +21,7 @@ from ..logger import Logger
 from ..models import LightNovel, LightNovelImage, LightNovelVolume, LightNovelChapter, CatalogMasiroVolume, \
     CatalogBaseVolume
 from ..utils import (check_image_integrity, create_folder_if_not_exists,
-                     is_async, is_valid_image_url)
+                     is_async, is_valid_image_url,upload_file)
 from webdav4.client import Client
 # IMAGE_DOWNLOAD_STRATEGY
 MULTIPROCESSING = 'MULTIPROCESSING'
@@ -200,18 +201,19 @@ class BaseNovelWebsiteSpider(ABC):
 
         # 上传pickle文件
         if len(self.spider_settings['webdav_host'])!=0:
-            webdav = Client(self.spider_settings['webdav_host'],auth=(self.spider_settings['webdav_username'],self.spider_settings['webdav_password']))
-            # webdav.mkdir('epub/'+self.spider_settings['novel_pickle_path'])
+            upload_file(self.spider_settings['novel_pickle_path'],'epub/'+self.spider_settings['novel_pickle_path'])
+            # webdav = Client(self.spider_settings['webdav_host'],auth=(self.spider_settings['webdav_username'],self.spider_settings['webdav_password']))
+            # # webdav.mkdir('epub/'+self.spider_settings['novel_pickle_path'])
 
-            before=''
-            to_path=('epub/'+self.spider_settings['novel_pickle_path']).split('/')
-            for index in range(len(to_path)):
-                if index < len(to_path) - 1:
-                    before=before+to_path[index]+'/'
-                    webdav.mkdir(before)
-            # if webdav.exists('epub/'+self.spider_settings['novel_pickle_path']):
-            #     webdav.remove('epub/'+self.spider_settings['novel_pickle_path'])
-            webdav.upload_file(self.spider_settings['novel_pickle_path'], 'epub/'+self.spider_settings['novel_pickle_path'],overwrite=True)
+            # before=''
+            # to_path=('epub/'+self.spider_settings['novel_pickle_path']).split('/')
+            # for index in range(len(to_path)):
+            #     if index < len(to_path) - 1:
+            #         before=before+to_path[index]+'/'
+            #         webdav.mkdir(before)
+            # # if webdav.exists('epub/'+self.spider_settings['novel_pickle_path']):
+            # #     webdav.remove('epub/'+self.spider_settings['novel_pickle_path'])
+            # webdav.upload_file(self.spider_settings['novel_pickle_path'], 'epub/'+self.spider_settings['novel_pickle_path'],overwrite=True)
 
 
         start = time.perf_counter()

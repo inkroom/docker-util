@@ -22,7 +22,7 @@ from .spider import ASYNCIO, LinovelibMobileSpider  # type: ignore[attr-defined]
 from .spider.masiro_spider import MasiroSpider
 from .spider.wenku8_spider import Wenku8Spider
 from .utils import (create_folder_if_not_exists, random_useragent,
-                    read_pkg_resource, sanitize_pathname)
+                    read_pkg_resource, sanitize_pathname,upload_file)
 from functools import reduce
 from webdav4.client import Client
 class EpubWriter:
@@ -215,14 +215,15 @@ class EpubWriter:
         book_file_name = (out_folder) + "/" + prefix + sanitize_pathname(title) + '.epub'
         epub.write_epub(book_file_name, book)
         if len(self.epub_settings['webdav_host'])!=0:
-            webdav = Client(self.epub_settings['webdav_host'],auth=(self.epub_settings['webdav_username'],self.epub_settings['webdav_password']))   
-            before=''
-            to_path=('epub/'+book_file_name).split('/')
-            for index in range(len(to_path)):
-                if index < len(to_path) - 1:
-                    before=before+to_path[index]+'/'
-                    webdav.mkdir(before)          
-            webdav.upload_file(book_file_name, 'epub/'+book_file_name,overwrite=True)
+            upload_file(book_file_name,'epub/'+book_file_name)
+            # webdav = Client(self.epub_settings['webdav_host'],auth=(self.epub_settings['webdav_username'],self.epub_settings['webdav_password']))   
+            # before=''
+            # to_path=('epub/'+book_file_name).split('/')
+            # for index in range(len(to_path)):
+            #     if index < len(to_path) - 1:
+            #         before=before+to_path[index]+'/'
+            #         webdav.mkdir(before)          
+            # webdav.upload_file(book_file_name, 'epub/'+book_file_name,overwrite=True)
 
     @staticmethod
     def _set_page_style(book: EpubBook,
