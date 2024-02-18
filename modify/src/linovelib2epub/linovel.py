@@ -124,7 +124,7 @@ class EpubWriter:
                 # volume_title as h1
                 html_volume_title = "<h1>" + volume_title + "</h1>"
                 write_content += html_volume_title
-                book.toc.append([epub.Link(f"{file_index + 1}.xhtml", volume_title, str(uuid.uuid4())), []])
+                book.toc.append([epub.Link("%03d." % volume.volume_id + volume_title + "/%04d.xhtml" %(file_index + 1), volume_title, str(uuid.uuid4())), []])
 
             chapter_index += 1
             for chapter in volume.chapters:
