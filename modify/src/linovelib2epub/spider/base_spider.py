@@ -366,7 +366,7 @@ class BaseNovelWebsiteSpider(ABC):
             new_volume = book.add_new_volume(new_volume)
 
             chapter_id = -1
-            chapter_list: new_volume.chapters  # store chapters
+            chapter_list = new_volume.chapters  # store chapters
 
             for catalog_chapter in catalog_volume.chapters:
                 chapter_id += 1
@@ -438,3 +438,4 @@ class BaseNovelWebsiteSpider(ABC):
         :return:
         """
         return page
+

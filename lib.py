@@ -31,7 +31,7 @@ if __name__ == '__main__':
     parser.add_argument('-d','--divide',help="分卷",default=False,action="store_true")
     parser.add_argument('-l','--load',help="加载pickle",default=False,action="store_true")
     parser.add_argument('-f','--site',help="来源",default='linovelib_mobile',choices=from_choices)
-    parser.add_argument('-w','--date',help="输出文件夹附带日志",default=False,action="store_true")
+    parser.add_argument('-w','--date',help="输出文件夹附带日期",default=False,action="store_true")
     parser.add_argument('-n','--new_title',help='json object格式的新标题',default='')
     parser.add_argument('-wh','--webdav_host',help='webdav_host',default='')
     parser.add_argument('-wu','--webdav_username',help='webdav_username',default='')

@@ -34,19 +34,20 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
         default_ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0'
         default_referer = 'https://www.bilinovel.com'
         headers = {
-            # 'Host': 'www.bilinovel.com'
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SAMSUNG-SM-T377A Build/NMF26X) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.216/217 Mobile Safari/537.36'
-            ,'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-            ,'Accept-Language': 'zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2'
-            ,'Accept-Encoding': 'gzip, deflate, br'
-            ,'DNT': '1'
-            ,'Referer': default_referer
-            ,'Upgrade-Insecure-Requests': '1'
-            ,'Sec-Fetch-Dest': 'document'
-            ,'Sec-Fetch-Mode': 'navigate'
-            ,'Sec-Fetch-Site': 'same-origin'
-            ,'Sec-Fetch-User': '?1'
-            ,'TE': 'trailers'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:124.0) Gecko/20100101 Firefox/124.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://www.bilinovel.com/',
+            'DNT': '1',
+            'Sec-GPC': '1',
+            'Connection': 'keep-alive',
+            'Cookie': 'night=0; cf_clearance=OM9MdMp7dmgCNH_niZk0WJN7X04TNMxLwxYr_NmAGZQ-1714031620-1.0.1.1-KSzW_i1t6D7JUE7PPRaiNLjXgaWW9_7sJoZJdeWjs_RZg5sQtOU8W6ZPrBHpoDXDI4r9Td1A9ArzJXUhLJkDXA; jieqiRecentRead=5.1289.0.1.1714031743.0',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-User': '?1',
         }
         return headers
 
@@ -256,6 +257,9 @@ class LinovelibMobileSpider(BaseNovelWebsiteSpider):
                             chapter_illustrations.append(light_novel_image)
 
                         article = _anti_js_obfuscation(article)
+                        if "内容加载失败" in article:
+                            self.logger.error(f'未突破防爬措施 {article}')
+                            raise LinovelibException(f'未突破防爬措施')
                         chapter_content += article
 
                         self.logger.info(f'Processing page... {page_link}')
