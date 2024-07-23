@@ -57,8 +57,7 @@ class EpubWriter:
         # tips: show output file folder
         output_folder = os.path.join(os.getcwd(), self._get_output_folder())
         self.logger.info('(Perf metrics) Write epub took: {} seconds'.format(time.perf_counter() - start))
-        rich_print(f"The output epub is located in [link={output_folder}]this folder[/link]. "
-                   f"(You can see the link if you use a modern shell.)")
+        self.logger.info(f"The output epub is located in {output_folder}. ")
 
     def _write_epub(self,
                     bookId: str,
@@ -214,6 +213,7 @@ class EpubWriter:
                 prefix = "%02d." % int(volume.volume_id)
         book_file_name = (out_folder) + "/" + prefix + sanitize_pathname(title) + '.epub'
         epub.write_epub(book_file_name, book)
+        self.logger.info(f"write file {book_file_name}")
         if len(self.epub_settings['webdav_host'])!=0:
             upload_file(book_file_name,'epub/'+book_file_name)
             # webdav = Client(self.epub_settings['webdav_host'],auth=(self.epub_settings['webdav_username'],self.epub_settings['webdav_password']))   
