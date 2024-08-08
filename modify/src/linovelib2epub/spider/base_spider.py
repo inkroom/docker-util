@@ -410,7 +410,7 @@ class BaseNovelWebsiteSpider(ABC):
                                                         volume_id=volume_id,
                                                         book_id=self.spider_settings['book_id'])
 
-                    image_local_src = f'{self.spider_settings["image_download_folder"]}/{light_novel_image.local_relative_path}'
+                    image_local_src = f'../{self.spider_settings["image_download_folder"]}/{light_novel_image.local_relative_path}'
                     new_image = str(image).replace(str(src_value.group()), image_local_src)
                     chapter_body = chapter_body.replace(str(image), new_image)
                     chapter_illustrations.append(light_novel_image)
