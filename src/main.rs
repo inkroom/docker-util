@@ -467,7 +467,7 @@ struct Args {
 impl Args {
     pub(crate) fn print_help() {
         let args: Vec<String> = std::env::args().collect();
-        println!("Usage: {} [--no-r number] [--no-up] url", args[0]);
+        println!("Usage: {} [--title number] [--no-up] url", args[0]);
         println!("--");
         println!("\t--title\t获取的标题部分，0全部，1括号外的，2括号里的，默认为1");
         println!("\t--no-up\t不上传");
