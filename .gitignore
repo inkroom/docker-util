@@ -1,0 +1,5 @@
+/target
+temp
+*.epub
+*.lock
+geckodriver

@@ -1,0 +1,7 @@
+Dockerfile
+Dockerfile.dev
+target
+temp
+*.lock
+*.epub
+*.png

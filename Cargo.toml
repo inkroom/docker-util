@@ -1,0 +1,10 @@
+[package]
+name = "wenku"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iepub = "0.9.1"
+rust-crypto = "0.2.36"
+selenium = { git = "https://github.com/inkroom/selenium-rs", rev="2c6e303ba4861e0d03e144be574a8cfad930f67f", version = "0.1.0" }
+ureq = "3.0.12"
