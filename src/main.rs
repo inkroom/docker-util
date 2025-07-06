@@ -125,7 +125,6 @@ mod cos {
             }
         }
     }
-
 }
 
 /// 生成一个短链
@@ -162,16 +161,32 @@ fn open_url(url: String, driver: &Driver) -> Result<(), SError> {
     Ok(())
 }
 
-fn run(driver: &Driver, url: &str, id: &str) -> Result<(String, EpubBuilder), SError> {
+fn run(driver: &Driver, url: &str, id: &str, arg: &Args) -> Result<(String, EpubBuilder), SError> {
     let mut book = EpubBuilder::new().custome_nav(true);
 
     open_url(url.to_string(), driver)?;
 
-    let title = driver
+    let mut title = driver
         .find_element(driver::By::Css("#content"))?
         .find_elements(driver::By::Css("table"))?[1]
         .find_element(driver::By::Css("b"))?
         .get_text()?;
+    if arg.title != 0 {
+        // 有的标题有两部分，如 A(B) ,去除括号里的
+        let begin = title.find(|f| f == '(');
+        let end = title.find(|f| f == ')');
+        if let Some(begin) = begin
+            && let Some(end) = end
+        {
+            if end == title.len() - 1 && begin != 0 {
+                if arg.title == 1 {
+                    title = title[..begin].to_string();
+                } else if arg.title == 2 {
+                    title = title[(begin + 1)..end].to_string();
+                }
+            }
+        }
+    }
     println!("title = {}", title);
     if title.trim().is_empty() {
         return Err(SError::Driver("get book title fail".to_string()));
@@ -439,9 +454,77 @@ fn get_menu(
     Ok(book)
 }
 
-fn main() {
-    let v: Vec<String> = std::env::args().collect();
+#[derive(Debug)]
+struct Args {
+    /// 获取的标题部分，0全部，1括号外的，2括号里的，默认为1
+    title: usize,
+    help: bool,
+    url: String,
+    /// 不上传，默认为false，也就是要上传
+    no_upload: bool,
+}
 
+impl Args {
+    pub(crate) fn print_help() {
+        let args: Vec<String> = std::env::args().collect();
+        println!("Usage: {} [--no-r number] [--no-up] url", args[0]);
+        println!("--");
+        println!("\t--title\t获取的标题部分，0全部，1括号外的，2括号里的，默认为1");
+        println!("\t--no-up\t不上传");
+    }
+    pub(crate) fn parse() -> Args {
+        let mut args: Vec<String> = std::env::args().collect();
+        args.remove(0); // 第一个是程序自己，需要去除
+
+        let mut res = Args {
+            title: 1,
+            help: false,
+            url: String::new(),
+            no_upload: false,
+        };
+
+        // 解析参数
+        let mut iter = args.iter_mut().peekable();
+
+        loop {
+            let next = iter.next();
+
+            if next.is_none() {
+                break;
+            }
+
+            let arg = next.unwrap();
+
+            if arg == "--title" {
+                // 获取下一个参数
+                res.title = iter
+                    .next()
+                    .expect("--title number")
+                    .parse()
+                    .expect("--title 0,1,2");
+                if res.title > 2 {
+                    panic!("--title 0,1,2")
+                }
+            } else if arg == "--help" {
+                res.help = true;
+                return res;
+            } else if arg == "--no-up" {
+                res.no_upload = true;
+                return res;
+            } else {
+                res.url = arg.to_string();
+            }
+        }
+        res
+    }
+}
+
+fn main() {
+    let arg = Args::parse();
+    if arg.help {
+        Args::print_help();
+        return;
+    }
     let option = FirefoxBuilder::new()
         .driver(
             format!(
@@ -460,11 +543,12 @@ fn main() {
 
     let d = Driver::new(option).unwrap();
 
-    let id = v[1]
+    let id = arg
+        .url
         .replace("https://www.wenku8.net/book/", "")
         .replace(".htm", "");
 
-    match run(&d, v[1].as_str(), id.as_str()) {
+    match run(&d, arg.url.as_str(), id.as_str(), &arg) {
         Ok((title, book)) => {
             let f = format!("out/{}.epub", title);
             println!("writing epub book to file {f}");
@@ -482,8 +566,10 @@ fn main() {
                 ),
                 id
             );
-            println!("upload file to cos {remote}");
-            cos::CosClient::new().put_object(&remote, std::fs::read(f.as_str()).unwrap());
+            if !arg.no_upload {
+                println!("upload file to cos {remote}");
+                cos::CosClient::new().put_object(&remote, std::fs::read(f.as_str()).unwrap());
+            }
         }
         Err(e) => {
             if let Ok(img) = d.take_screenshot() {
@@ -495,8 +581,6 @@ fn main() {
             panic!("error {}", e);
         }
     };
-
-    // sleep(Duration::from_secs(60));
 }
 
 /// 时间戳转换，从1970年开始
