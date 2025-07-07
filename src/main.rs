@@ -134,8 +134,9 @@ fn short_url(url: &str) -> String {
     h.finish().to_string()
 }
 
-fn open_url(url: String, driver: &Driver) -> Result<(), SError> {
-    for i in 0..3 {
+fn open_url(url: String, driver: &Driver, arg: &Args) -> Result<(), SError> {
+    let mut sleep_time = arg.retry;
+    for i in 0..arg.retry {
         driver.get(url.as_str())?;
         // 判断是否被cf了
         if driver
@@ -152,7 +153,8 @@ fn open_url(url: String, driver: &Driver) -> Result<(), SError> {
                 // 最后一次
                 return Err(SError::Message("CF".to_string()));
             }
-            sleep(Duration::from_secs(5));
+            sleep(Duration::from_secs(sleep_time));
+            sleep_time = sleep_time + arg.sleep;
         } else {
             break;
         }
@@ -164,7 +166,7 @@ fn open_url(url: String, driver: &Driver) -> Result<(), SError> {
 fn run(driver: &Driver, url: &str, id: &str, arg: &Args) -> Result<(String, EpubBuilder), SError> {
     let mut book = EpubBuilder::new().custome_nav(true);
 
-    open_url(url.to_string(), driver)?;
+    open_url(url.to_string(), driver, arg)?;
 
     let mut title = driver
         .find_element(driver::By::Css("#content"))?
@@ -248,7 +250,7 @@ fn run(driver: &Driver, url: &str, id: &str, arg: &Args) -> Result<(String, Epub
         .get_property("href")?
         .unwrap();
     println!("menu url = {url}");
-    Ok((title, get_menu(url, driver, book, id)?))
+    Ok((title, get_menu(url, driver, book, id, arg)?))
 }
 
 fn download_img(url: &str) -> Result<Vec<u8>, SError> {
@@ -321,6 +323,7 @@ fn get_content(
     file_name: &str,
     index: usize,
     id: &str,
+    arg: &Args,
 ) -> Result<(EpubHtml, Vec<(String, Vec<u8>)>), SError> {
     let html_temp = format!("temp/{id}/{}.h", short_url(url.as_str()));
     let src_temp = format!("temp/{id}/{}.s", short_url(url.as_str()));
@@ -344,7 +347,7 @@ fn get_content(
 
     println!("get content title={title} url={url}");
 
-    open_url(url.clone(), driver)?;
+    open_url(url.clone(), driver, arg)?;
 
     let src:String = driver.execute_script(r#"
     for(;;){var s = document.getElementById("contentdp");if(s){s.remove();}else{break;}}
@@ -387,6 +390,7 @@ fn get_menu(
     driver: &Driver,
     book: EpubBuilder,
     id: &str,
+    arg: &Args,
 ) -> Result<EpubBuilder, SError> {
     let mut book = book;
     std::fs::create_dir_all(format!("temp/{id}/Images"))?;
@@ -417,8 +421,15 @@ fn get_menu(
             let t = EpubNav::default()
                 .with_title(title)
                 .with_file_name(format!("Text/{}.xhtml", index).as_str());
-            let (html, assets) =
-                get_content(url.to_string(), driver, t.title(), t.file_name(), index, id)?;
+            let (html, assets) = get_content(
+                url.to_string(),
+                driver,
+                t.title(),
+                t.file_name(),
+                index,
+                id,
+                arg,
+            )?;
             book = book.add_chapter(html);
 
             for ele in assets {
@@ -462,26 +473,38 @@ struct Args {
     url: String,
     /// 不上传，默认为false，也就是要上传
     no_upload: bool,
+    /// 等待cf时间，默认5秒
+    sleep: usize,
+    /// 重试cf次数，默认3次
+    retry: usize,
 }
 
 impl Args {
+    fn default() -> Args {
+        Args {
+            title: 1,
+            help: false,
+            url: String::new(),
+            no_upload: false,
+            sleep: 5,
+            retry: 3,
+        }
+    }
+
     pub(crate) fn print_help() {
         let args: Vec<String> = std::env::args().collect();
         println!("Usage: {} [--title number] [--no-up] url", args[0]);
         println!("--");
         println!("\t--title\t获取的标题部分，0全部，1括号外的，2括号里的，默认为1");
         println!("\t--no-up\t不上传");
+        println!("\t--sleep\t等待cf时间，单位秒，默认5秒");
+        println!("\t--retry\t重试cf次数，默认3");
     }
-    pub(crate) fn parse() -> Args {
+    pub(crate) fn parse() -> Self {
         let mut args: Vec<String> = std::env::args().collect();
         args.remove(0); // 第一个是程序自己，需要去除
 
-        let mut res = Args {
-            title: 1,
-            help: false,
-            url: String::new(),
-            no_upload: false,
-        };
+        let mut res = Self::default();
 
         // 解析参数
         let mut iter = args.iter_mut().peekable();
@@ -511,6 +534,24 @@ impl Args {
             } else if arg == "--no-up" {
                 res.no_upload = true;
                 return res;
+            } else if arg == "--sleep" {
+                res.sleep = iter
+                    .next()
+                    .expect("--sleep number")
+                    .parse()
+                    .expect("--sleep number");
+                if res.title > 2 {
+                    panic!("--sleep number")
+                }
+            } else if arg == "--retry" {
+                res.retry = iter
+                    .next()
+                    .expect("--retry number")
+                    .parse()
+                    .expect("--retry number");
+                if res.title > 2 {
+                    panic!("--retry number")
+                }
             } else {
                 res.url = arg.to_string();
             }
