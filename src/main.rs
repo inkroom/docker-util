@@ -135,7 +135,7 @@ fn short_url(url: &str) -> String {
 }
 
 fn open_url(url: String, driver: &Driver, arg: &Args) -> Result<(), SError> {
-    let mut sleep_time = arg.retry;
+    let mut sleep_time = arg.sleep;
     for i in 0..arg.retry {
         driver.get(url.as_str())?;
         // 判断是否被cf了
@@ -368,7 +368,7 @@ fn get_content(
 
     std::fs::write(html_temp.as_str(), html.as_ref().unwrap())?;
 
-    sleep(Duration::from_secs(5));
+    sleep(Duration::from_secs(arg.sleep));
     driver.close_window()?;
     driver.switch_to_window(&handle)?;
 
@@ -474,7 +474,7 @@ struct Args {
     /// 不上传，默认为false，也就是要上传
     no_upload: bool,
     /// 等待cf时间，默认5秒
-    sleep: usize,
+    sleep: u64,
     /// 重试cf次数，默认3次
     retry: usize,
 }
