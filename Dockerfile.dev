@@ -51,7 +51,7 @@ RUN echo "export CARGO_HOME=${CARGO_HOME}" >> /etc/profile \
     && echo "export RUSTUP_HOME=${RUSTUP_HOME}" >> /root/.zshrc \
     && echo "export RUST_VERSION=$v" >> /root/.zshrc \
     && echo "export PATH=${PATH}" >> /root/.zshrc
-
-
+ENV VNCNAME "wenku8"
+RUN sed -i "s@-fg@-fg -desktop ${VNCNAME}@g" /app/tiger.sh
 RUN sh /app/scripts/prepare_firefox_ppa.sh && apt update -y && apt install -y firefox
 RUN apt install -y gcc g++ make pkg-config libssl-dev unzip

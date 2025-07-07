@@ -1,8 +1,14 @@
 {
 	"name": "webku8",
-		"build": {
+	"build": {
 		"dockerfile": "Dockerfile.dev"
 	},
+	"overrideCommand":false,
+	"mounts":[
+		{"source":"epub-mozilla","target":"/root/.mozilla","type":"volume"},
+		{"source":"epub-temp","target":"/app/temp","type":"volume"},
+		{"source":"epub-out","target":"/app/out","type":"volume"}
+	],
 	"forwardPorts":["5901"],
 	"customizations": {
 		"vscode": {
@@ -12,8 +18,8 @@
 			]
 		}
 	},
-	"containerEnv":{"DISPLAY":":1"},
+	"containerEnv":{"DISPLAY":":1","VNCPASS":"wenku"},
 	"onCreateCommand":
-		"(test -e geckodriver || ( wget https://github.com/mozilla/geckodriver/releases/download/v0.35.0/geckodriver-v0.35.0-linux32.tar.gz && tar -xf geckodriver-v0.35.0-linux32.tar.gz && rm -rf geckodriver-v0.35.0-linux32.tar.gz ) ) && apt update -y && apt install -y firefox-esr fonts-wqy-microhei && cargo clean && cargo build"
+		"(test -e geckodriver || ( wget https://github.com/mozilla/geckodriver/releases/download/v0.35.0/geckodriver-v0.35.0-linux32.tar.gz && tar -xf geckodriver-v0.35.0-linux32.tar.gz && rm -rf geckodriver-v0.35.0-linux32.tar.gz ) ) && cargo clean && cargo run -- --help "
 	
 }
