@@ -163,96 +163,6 @@ fn open_url(url: String, driver: &Driver, arg: &Args) -> Result<(), SError> {
     Ok(())
 }
 
-fn run(driver: &Driver, url: &str, id: &str, arg: &Args) -> Result<(String, EpubBuilder), SError> {
-    let mut book = EpubBuilder::new().custome_nav(true);
-
-    open_url(url.to_string(), driver, arg)?;
-
-    let mut title = driver
-        .find_element(driver::By::Css("#content"))?
-        .find_elements(driver::By::Css("table"))?[1]
-        .find_element(driver::By::Css("b"))?
-        .get_text()?;
-    if arg.title != 0 {
-        // 有的标题有两部分，如 A(B) ,去除括号里的
-        let begin = title.find(|f| f == '(');
-        let end = title.find(|f| f == ')');
-        if let Some(begin) = begin
-            && let Some(end) = end
-        {
-            if end == title.len() - 1 && begin != 0 {
-                if arg.title == 1 {
-                    title = title[..begin].to_string();
-                } else if arg.title == 2 {
-                    title = title[(begin + 1)..end].to_string();
-                }
-            }
-        }
-    }
-    println!("title = {}", title);
-    if title.trim().is_empty() {
-        return Err(SError::Driver("get book title fail".to_string()));
-    }
-    book = book.with_title(&title);
-
-    let table = driver
-        .find_element(driver::By::Css("#content"))?
-        .find_elements(driver::By::Css("table"))?;
-
-    let mut tags = Vec::new();
-
-    let mut has_desc = false;
-
-    let desc = table[2].find_elements(driver::By::Css("span"))?;
-
-    for ele in desc {
-        if let Ok(text) = ele.get_text() {
-            if text.contains("作品Tags：") {
-                let temp = text.replace("作品Tags：", "");
-                tags.append(&mut temp.split(" ").map(|f| f.to_string()).collect());
-
-                book = book.with_subject(tags.join(",").as_str());
-            } else if text.contains("内容简介：") {
-                has_desc = true;
-            } else if has_desc {
-                has_desc = false;
-
-                book = book.with_description(&text);
-            }
-        }
-    }
-
-    // 封面
-    let src = table[2]
-        .find_element(driver::By::Css("img"))?
-        .get_attribute("src")?;
-    if let Some(src) = src
-        && let Ok(data) = download_img(&src)
-    {
-        println!("cover src={src}");
-        book = book.cover("cover.jpg", data);
-    }
-
-    // 作者和出版社
-    let td =
-        table[0].find_elements(driver::By::Css("tr"))?[2].find_elements(driver::By::Css("td"))?;
-    book = book
-        .with_publisher(td[0].get_text()?.replace("文库分类：", "").as_str())
-        // .with_identifier(id)
-        .with_creator(td[1].get_text()?.replace("小说作者：", "").as_str());
-
-    // 目录页
-    let f = driver
-        .find_element(driver::By::Id("content"))?
-        .find_elements(driver::By::Css("fieldset"))?;
-    let url = f[0]
-        .find_element(driver::By::Css("a"))?
-        .get_property("href")?
-        .unwrap();
-    println!("menu url = {url}");
-    Ok((title, get_menu(url, driver, book, id, arg)?))
-}
-
 fn download_img(url: &str) -> Result<Vec<u8>, SError> {
     for i in 1..4 {
         match ureq::get(url)
@@ -276,26 +186,29 @@ fn download_img(url: &str) -> Result<Vec<u8>, SError> {
     Err(SError::Http(0, "img download fail".to_string()))
 }
 
-fn get_img_data(src: &str, index: usize, id: &str) -> Result<Vec<(String, Vec<u8>)>, SError> {
+fn get_img_data<T: Spider>(
+    spider: &T,
+    src: &str,
+    img_filename_prefix: String,
+    id: &str,
+) -> Result<Vec<(String, Vec<u8>)>, SError> {
     let mut assets = Vec::new();
-
-    let s: Vec<_> = src.split("\n").collect();
-    // 下载图片
-    for (i, ele) in s.iter().enumerate() {
-        if ele.trim().is_empty() {
+    let img = spider.get_img_src(src, img_filename_prefix);
+    for (url, filename) in img {
+        if url.is_empty() {
             continue;
         }
-        let f = format!("temp/{id}/Images/{}-{}.jpg", index, i);
+        let f = format!("temp/{id}/{}", filename);
         if std::fs::exists(&f).unwrap_or(false) {
             let t = std::fs::read(&f)?;
-            assets.push((f.replace(format!("temp/{id}/").as_str(), ""), t));
+            assets.push((format!("Images/{}", filename), t));
             continue;
         }
-        println!("downloading img from {ele} to {f}");
-        let n = download_img(ele)?;
+        println!("downloading img from {url} to {f}");
+        let n = download_img(url.as_str())?;
 
         std::fs::write(&f, &n).unwrap();
-        assets.push((f.replace(format!("temp/{id}/").as_str(), ""), n));
+        assets.push((format!("Images/{}", filename), n));
     }
     Ok(assets)
 }
@@ -314,155 +227,6 @@ fn replace_br_html(html: String) -> String {
     } else {
         v.trim().to_string()
     }
-}
-
-fn get_content(
-    url: String,
-    driver: &Driver,
-    title: &str,
-    file_name: &str,
-    index: usize,
-    id: &str,
-    arg: &Args,
-) -> Result<(EpubHtml, Vec<(String, Vec<u8>)>), SError> {
-    let html_temp = format!("temp/{id}/{}.h", short_url(url.as_str()));
-    let src_temp = format!("temp/{id}/{}.s", short_url(url.as_str()));
-
-    if let Ok(html) = std::fs::read_to_string(html_temp.as_str())
-        && let Ok(src) = std::fs::read_to_string(src_temp.as_str())
-    {
-        return Ok((
-            EpubHtml::default()
-                .with_title(title)
-                .with_file_name(file_name)
-                .with_data(replace_br_html(html).as_bytes().to_vec()),
-            get_img_data(src.as_str(), index, id)?,
-        ));
-    }
-
-    // 切换新标签页
-    let handle = driver.get_window_handle()?;
-    let nw = driver.new_window(driver::NewWindowType::Tab)?;
-    driver.switch_to_window((nw).as_str())?;
-
-    println!("get content title={title} url={url}");
-
-    open_url(url.clone(), driver, arg)?;
-
-    let src:String = driver.execute_script(r#"
-    for(;;){var s = document.getElementById("contentdp");if(s){s.remove();}else{break;}}
-    var s=document.getElementById("content");s.removeAttribute("style");
-    var src = Array.from(s.getElementsByTagName('img')).map(v=>v.getAttribute('src')).join('\n');
-    var start = arguments[0];
-    Array.from(s.getElementsByTagName('img')).forEach((v,index)=>v.setAttribute('src','../Images/'+start+'-'+index+'.jpeg'));
-    return src;
-    "#, &[index.to_string().as_str()])?;
-
-    std::fs::write(src_temp, src.as_str())?;
-
-    let assets = get_img_data(src.as_str(), index, id)?;
-
-    let html = driver
-        .find_element(driver::By::Id("content"))?
-        .get_property("innerHTML")?;
-
-    std::fs::write(html_temp.as_str(), html.as_ref().unwrap())?;
-
-    sleep(Duration::from_secs(arg.sleep));
-    driver.close_window()?;
-    driver.switch_to_window(&handle)?;
-
-    Ok((
-        EpubHtml::default()
-            .with_title(title)
-            .with_file_name(file_name)
-            .with_data(
-                replace_br_html(html.unwrap_or_else(|| String::new()))
-                    .as_bytes()
-                    .to_vec(),
-            ),
-        assets,
-    ))
-}
-
-fn get_menu(
-    url: String,
-    driver: &Driver,
-    book: EpubBuilder,
-    id: &str,
-    arg: &Args,
-) -> Result<EpubBuilder, SError> {
-    let mut book = book;
-    std::fs::create_dir_all(format!("temp/{id}/Images"))?;
-    let menu_temp = format!("temp/{id}/{}.m", short_url(url.as_str()));
-
-    let menu_str: String = if let Ok(menu_str) = std::fs::read_to_string(menu_temp.as_str()) {
-        menu_str
-    } else {
-        println!("get menu from {url}");
-        driver.get(&url)?;
-        let v :String =         driver.execute_script(r#"return Array.from(document.getElementsByTagName('td')).filter(v=>v.innerText.trim().length>0).map(v=>{ if(v.getAttribute("class").indexOf("vcss")!=-1){   return v.innerHTML;    }else{ var a= v.childNodes[0];  return a.href +'|'+a.innerHTML;   }  }).join("\n")"#, &[])?;
-        std::fs::write(menu_temp.as_str(), v.as_str())?;
-        v
-    };
-
-    let mut navs = Vec::new();
-    let mut nav: Option<EpubNav> = None;
-
-    let menu: Vec<_> = menu_str.split("\n").collect();
-    for (index, ele) in menu.iter().enumerate() {
-        if let Some(s) = ele.find(|c: char| c == '|') {
-            // 普通标题
-            let url = &ele[..s];
-            let title = &ele[(s + 1)..];
-
-            println!("title = {}, url = {url}", title);
-
-            let t = EpubNav::default()
-                .with_title(title)
-                .with_file_name(format!("Text/{}.xhtml", index).as_str());
-            let (html, assets) = get_content(
-                url.to_string(),
-                driver,
-                t.title(),
-                t.file_name(),
-                index,
-                id,
-                arg,
-            )?;
-            book = book.add_chapter(html);
-
-            for ele in assets {
-                book = book.add_assets(ele.0.as_str(), ele.1);
-            }
-
-            if let Some(n) = &mut nav {
-                n.push(t);
-            } else {
-                navs.push(t);
-            }
-        } else {
-            // 卷标题
-            println!("title = {}", ele);
-            if let Some(n) = nav {
-                navs.push(n);
-            }
-            nav = Some(
-                EpubNav::default()
-                    .with_title(ele)
-                    .with_file_name(format!("{}.xhtml", index + 1).as_str()),
-            );
-        }
-    }
-    if let Some(n) = nav {
-        navs.push(n);
-    }
-
-    for ele in navs {
-        book = book.add_nav(ele);
-    }
-
-    Ok(book)
 }
 
 #[derive(Debug)]
@@ -560,6 +324,340 @@ impl Args {
     }
 }
 
+pub(crate) trait Spider {
+    fn new(driver: Driver, arg: Args) -> Self;
+
+    fn get_driver(&self) -> &Driver;
+
+    fn get_arg(&self) -> &Args;
+
+    fn get_book_id(&self) -> String;
+
+    ///
+    /// 获取书籍基本信息
+    ///
+    /// # Returns
+    ///
+    /// 书本，标题，目录页url
+    ///
+    fn get_book_info(&self) -> Result<(EpubBuilder, String, String), SError>;
+
+    ///
+    /// 获取menu的字符串形式
+    ///
+    fn get_menu_str(&self, url: String) -> Result<String, SError>;
+
+    ///
+    /// 解析menu_str
+    ///
+    // fn get_from_menu<T: FnMut(Option<String>, String, usize) -> Result<(), SError>>(
+    //     self,
+    //     driver: &Driver,
+    //     arg: &Args,
+    //     menu_str: String,
+    //     item_fn: T,
+    // ) -> Result<(), SError>;
+    fn get_menu_from_str(&self, menu_str: String) -> Result<Vec<(Option<String>, String)>, SError>;
+
+    ///
+    /// 获取content内容
+    ///
+    /// # Params
+    /// url 章节的url
+    /// index 当前章节的索引
+    ///
+    /// # Returns
+    ///
+    /// 返回html和图片的src集合字符串；html应该已经处理好img src的转变
+    fn get_content(&self, url: String, img_src_prefix: String) -> Result<(String, String), SError>;
+
+    ///
+    /// url,filename
+    ///
+    fn get_img_src(&self, src: &str, img_src_prefix: String) -> Vec<(String, String)>;
+
+    ///
+    /// 修正原始的html
+    ///
+    fn convert_html(&self, html: String) -> String;
+}
+
+struct Wenku8 {
+    driver: Driver,
+    arg: Args,
+}
+
+impl Spider for Wenku8 {
+    fn new(driver: Driver, arg: Args) -> Self {
+        Self { driver, arg }
+    }
+
+    fn get_book_id(&self) -> String {
+        self.arg
+            .url
+            .replace("https://www.wenku8.net/book/", "")
+            .replace(".htm", "")
+    }
+
+    fn get_driver(&self) -> &Driver {
+        &self.driver
+    }
+
+    fn get_arg(&self) -> &Args {
+        &self.arg
+    }
+
+    fn get_book_info(&self) -> Result<(EpubBuilder, String, String), SError> {
+        let mut book = EpubBuilder::new().custome_nav(true);
+
+        open_url(self.arg.url.to_string(), &self.driver, &self.arg)?;
+
+        let mut title = self
+            .driver
+            .find_element(driver::By::Css("#content"))?
+            .find_elements(driver::By::Css("table"))?[1]
+            .find_element(driver::By::Css("b"))?
+            .get_text()?;
+        if self.arg.title != 0 {
+            // 有的标题有两部分，如 A(B) ,去除括号里的
+            let begin = title.find(|f| f == '(');
+            let end = title.find(|f| f == ')');
+            if let Some(begin) = begin
+                && let Some(end) = end
+            {
+                if end == title.len() - 1 && begin != 0 {
+                    if self.arg.title == 1 {
+                        title = title[..begin].to_string();
+                    } else if self.arg.title == 2 {
+                        title = title[(begin + 1)..end].to_string();
+                    }
+                }
+            }
+        }
+        println!("title = {}", title);
+        if title.trim().is_empty() {
+            return Err(SError::Driver("get book title fail".to_string()));
+        }
+        book = book.with_title(&title);
+
+        let table = self
+            .driver
+            .find_element(driver::By::Css("#content"))?
+            .find_elements(driver::By::Css("table"))?;
+
+        let mut tags = Vec::new();
+
+        let mut has_desc = false;
+
+        let desc = table[2].find_elements(driver::By::Css("span"))?;
+
+        for ele in desc {
+            if let Ok(text) = ele.get_text() {
+                if text.contains("作品Tags：") {
+                    let temp = text.replace("作品Tags：", "");
+                    tags.append(&mut temp.split(" ").map(|f| f.to_string()).collect());
+
+                    book = book.with_subject(tags.join(",").as_str());
+                } else if text.contains("内容简介：") {
+                    has_desc = true;
+                } else if has_desc {
+                    has_desc = false;
+
+                    book = book.with_description(&text);
+                }
+            }
+        }
+
+        // 封面
+        let src = table[2]
+            .find_element(driver::By::Css("img"))?
+            .get_attribute("src")?;
+        if let Some(src) = src
+            && let Ok(data) = download_img(&src)
+        {
+            println!("cover src={src}");
+            book = book.cover("cover.jpg", data);
+        }
+
+        // 作者和出版社
+        let td = table[0].find_elements(driver::By::Css("tr"))?[2]
+            .find_elements(driver::By::Css("td"))?;
+        book = book
+            .with_publisher(td[0].get_text()?.replace("文库分类：", "").as_str())
+            // .with_identifier(id)
+            .with_creator(td[1].get_text()?.replace("小说作者：", "").as_str());
+
+        // 目录页
+        let f = self
+            .driver
+            .find_element(driver::By::Id("content"))?
+            .find_elements(driver::By::Css("fieldset"))?;
+        let url = f[0]
+            .find_element(driver::By::Css("a"))?
+            .get_property("href")?
+            .unwrap();
+
+        Ok((book, title, url))
+    }
+
+    fn get_menu_str(&self, url: String) -> Result<String, SError> {
+        open_url(url, &self.driver, &self.arg)?;
+        let v :String =self.driver.execute_script(r#"return Array.from(document.getElementsByTagName('td')).filter(v=>v.innerText.trim().length>0).map(v=>{ if(v.getAttribute("class").indexOf("vcss")!=-1){   return v.innerHTML;    }else{ var a= v.childNodes[0];  return a.href +'|'+a.innerHTML;   }  }).join("\n")"#, &[])?;
+        Ok(v)
+    }
+
+    fn get_menu_from_str(&self, menu_str: String) -> Result<Vec<(Option<String>, String)>, SError> {
+        let mut res = Vec::new();
+        let menu: Vec<_> = menu_str.split("\n").collect();
+        for ele in menu {
+            if let Some(s) = ele.find(|c: char| c == '|') {
+                // 普通标题
+                let url = &ele[..s];
+                let title = &ele[(s + 1)..];
+                res.push((Some(url.to_string()), title.to_string()));
+            } else {
+                res.push((None, ele.to_string()));
+            }
+        }
+        Ok(res)
+    }
+
+    fn get_img_src(&self, src: &str, img_src_prefix: String) -> Vec<(String, String)> {
+        let mut assets = Vec::new();
+        if src.trim().is_empty() {
+            return assets;
+        }
+        let s: Vec<_> = src.split("\n").collect();
+
+        for (index, url) in s.iter().enumerate() {
+            assets.push((url.to_string(), format!("{}{}.jpg", img_src_prefix, index)));
+        }
+        assets
+    }
+
+    fn get_content(&self, url: String, img_src_prefix: String) -> Result<(String, String), SError> {
+        // 切换新标签页
+        let handle = self.driver.get_window_handle()?;
+        let nw = self.driver.new_window(driver::NewWindowType::Tab)?;
+        self.driver.switch_to_window((nw).as_str())?;
+
+        open_url(url.clone(), &self.driver, &self.arg)?;
+
+        let src:String = self.driver.execute_script(r#"
+    for(;;){var s = document.getElementById("contentdp");if(s){s.remove();}else{break;}}
+    var s=document.getElementById("content");s.removeAttribute("style");
+    var src = Array.from(s.getElementsByTagName('img')).map(v=>v.getAttribute('src')).join('\n');
+    var start = arguments[0];
+    Array.from(s.getElementsByTagName('img')).forEach((v,index)=>v.setAttribute('src', start+index+'.jpg'));
+    return src;
+    "#, &[img_src_prefix.as_str()])?;
+
+        let html = self
+            .driver
+            .find_element(driver::By::Id("content"))?
+            .get_property("innerHTML")?;
+
+        sleep(Duration::from_secs(self.arg.sleep));
+        self.driver.close_window()?;
+        self.driver.switch_to_window(&handle)?;
+        Ok((html.unwrap_or_else(|| String::new()), src))
+    }
+    fn convert_html(&self, html: String) -> String {
+        replace_br_html(html)
+    }
+}
+
+fn run_spider<T: Spider>(spider: &T) -> Result<(EpubBuilder, String), SError> {
+    let id = spider.get_book_id();
+    std::fs::create_dir_all(format!("temp/{id}/Images"))?;
+
+    let menu_temp = format!("temp/{id}/{}.m", short_url(spider.get_arg().url.as_str()));
+
+    // 获取bookInfo
+    let (mut builder, title, menu_url) = spider.get_book_info()?;
+    // 获取menu_str
+    let menu_str: String = if let Ok(menu_str) = std::fs::read_to_string(menu_temp.as_str()) {
+        menu_str
+    } else {
+        println!("get menu from {}", menu_url);
+        let v = spider.get_menu_str(menu_url)?;
+        std::fs::write(menu_temp.as_str(), v.as_str())?;
+        v
+    };
+
+    let mut navs = Vec::new();
+    let mut nav: Option<EpubNav> = None;
+
+    // 解析menu_str
+    let m = spider.get_menu_from_str(menu_str)?;
+
+    for (index, (url, title)) in m.iter().enumerate() {
+        if let Some(url) = url {
+            println!("title = {}, url = {url}", title);
+            let t = EpubNav::default()
+                .with_title(title.as_str())
+                .with_file_name(format!("Text/{}.xhtml", index).as_str());
+
+            let html_temp = format!("temp/{id}/{}.h", short_url(url.as_str()));
+            let src_temp = format!("temp/{id}/{}.s", short_url(url.as_str()));
+
+            let (html, assets) = if let Ok(html) = std::fs::read_to_string(html_temp.as_str())
+                && let Ok(src) = std::fs::read_to_string(src_temp.as_str())
+            {
+                (
+                    spider.convert_html(html),
+                    get_img_data(spider, src.as_str(), format!("{index}-"), id.as_str())?,
+                )
+            } else {
+                let (html, src) = spider.get_content(url.clone(), format!("../Images/{index}-"))?;
+                std::fs::write(html_temp.as_str(), html.as_str())?;
+                std::fs::write(src_temp.as_str(), src.as_str())?;
+
+                (
+                    spider.convert_html(html),
+                    get_img_data(spider, src.as_str(), format!("{index}-"), id.as_str())?,
+                )
+            };
+
+            builder = builder.add_chapter(
+                EpubHtml::default()
+                    .with_file_name(t.file_name())
+                    .with_title(t.title())
+                    .with_data(html.as_bytes().to_vec()),
+            );
+            for ele in assets {
+                builder = builder.add_assets(ele.0.as_str(), ele.1);
+            }
+
+            if let Some(n) = &mut nav {
+                n.push(t);
+            } else {
+                navs.push(t);
+            }
+        } else {
+            println!("title = {}", title);
+            if let Some(n) = nav {
+                navs.push(n);
+            }
+            nav = Some(
+                EpubNav::default()
+                    .with_title(title.as_str())
+                    .with_file_name(format!("{}.xhtml", index + 1).as_str()),
+            );
+        }
+    }
+
+    if let Some(n) = nav {
+        navs.push(n);
+    }
+
+    for ele in navs {
+        builder = builder.add_nav(ele);
+    }
+
+    Ok((builder, title))
+}
+
 fn main() {
     let arg = Args::parse();
     if arg.help {
@@ -584,13 +682,12 @@ fn main() {
 
     let d = Driver::new(option).unwrap();
 
-    let id = arg
-        .url
-        .replace("https://www.wenku8.net/book/", "")
-        .replace(".htm", "");
+    let spider = Wenku8::new(d,arg);
+    let id = spider.get_book_id();
 
-    match run(&d, arg.url.as_str(), id.as_str(), &arg) {
-        Ok((title, book)) => {
+    // match run(&d, arg.url.as_str(), id.as_str(), &arg) {
+    match run_spider(&spider) {
+        Ok((book, title)) => {
             let f = format!("out/{}.epub", title);
             println!("writing epub book to file {f}");
             let _ = std::fs::create_dir_all("out");
@@ -607,16 +704,16 @@ fn main() {
                 ),
                 id
             );
-            if !arg.no_upload {
+            if !spider.get_arg().no_upload {
                 println!("upload file to cos {remote}");
                 cos::CosClient::new().put_object(&remote, std::fs::read(f.as_str()).unwrap());
             }
         }
         Err(e) => {
-            if let Ok(img) = d.take_screenshot() {
+            if let Ok(img) = spider.get_driver().take_screenshot() {
                 let _ = std::fs::write(format!("temp/{id}/error.png"), img);
             }
-            if let Ok(source) = d.get_page_source() {
+            if let Ok(source) = spider.get_driver().get_page_source() {
                 let _ = std::fs::write(format!("temp/{id}/source.html"), source);
             }
             panic!("error {}", e);
