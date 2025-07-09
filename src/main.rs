@@ -9,7 +9,7 @@ use iepub::prelude::{EpubAssets, EpubBuilder, EpubHtml, EpubNav};
 use selenium::{
     SError,
     driver::{self, Driver},
-    option::FirefoxBuilder,
+    option::{FirefoxBuilder, Proxy},
 };
 /// 腾讯云存储api
 mod cos {
@@ -134,34 +134,6 @@ fn short_url(url: &str) -> String {
     h.finish().to_string()
 }
 
-fn open_url(url: String, driver: &Driver, arg: &Args) -> Result<(), SError> {
-    let mut sleep_time = arg.sleep;
-    for i in 0..arg.retry {
-        driver.get(url.as_str())?;
-        // 判断是否被cf了
-        if driver
-            .find_element(driver::By::Id("cf-error-details"))
-            .is_ok()
-            || driver
-                .find_element(driver::By::Css("body"))
-                .and_then(|f| f.get_text())
-                .map(|f| f.contains("Verifying you are human"))
-                .unwrap_or(false)
-        {
-            println!("cf, waiting for refresh");
-            if i == 2 {
-                // 最后一次
-                return Err(SError::Message("CF".to_string()));
-            }
-            sleep(Duration::from_secs(sleep_time));
-            sleep_time = sleep_time + arg.sleep;
-        } else {
-            break;
-        }
-    }
-
-    Ok(())
-}
 
 fn download_img(url: &str) -> Result<Vec<u8>, SError> {
     for i in 1..4 {
@@ -194,7 +166,9 @@ fn get_img_data<T: Spider>(
 ) -> Result<Vec<(String, Vec<u8>)>, SError> {
     let mut assets = Vec::new();
     let img = spider.get_img_src(src, img_filename_prefix);
-    for (url, filename) in img {
+    for i in img {
+        let url = i.url;
+        let filename = i.filename;
         if url.is_empty() {
             continue;
         }
@@ -241,6 +215,10 @@ struct Args {
     sleep: u64,
     /// 重试cf次数，默认3次
     retry: usize,
+    /// 代理
+    proxy: String,
+    /// 标题
+    new_title: String,
 }
 
 impl Args {
@@ -252,6 +230,8 @@ impl Args {
             no_upload: false,
             sleep: 5,
             retry: 3,
+            proxy: String::new(),
+            new_title: String::new(),
         }
     }
 
@@ -263,6 +243,8 @@ impl Args {
         println!("\t--no-up\t不上传");
         println!("\t--sleep\t等待cf时间，单位秒，默认5秒");
         println!("\t--retry\t重试cf次数，默认3");
+        println!("\t--proxy\t代理，如host:port");
+        println!(r#"\t--nt\t哔哩特供，修正标题，格式：{{"旧标题":"新标题"}}"#);
     }
     pub(crate) fn parse() -> Self {
         let mut args: Vec<String> = std::env::args().collect();
@@ -316,12 +298,21 @@ impl Args {
                 if res.title > 2 {
                     panic!("--retry number")
                 }
+            } else if arg == "--proxy" {
+                res.proxy = iter.next().expect("--proxy host:port").to_string();
+            } else if arg == "--nt" {
+                res.new_title = iter.next().expect("--nt json").to_string();
             } else {
                 res.url = arg.to_string();
             }
         }
         res
     }
+}
+
+struct ImgSrc {
+    filename: String,
+    url: String,
 }
 
 pub(crate) trait Spider {
@@ -350,13 +341,8 @@ pub(crate) trait Spider {
     ///
     /// 解析menu_str
     ///
-    // fn get_from_menu<T: FnMut(Option<String>, String, usize) -> Result<(), SError>>(
-    //     self,
-    //     driver: &Driver,
-    //     arg: &Args,
-    //     menu_str: String,
-    //     item_fn: T,
-    // ) -> Result<(), SError>;
+    /// # Returns
+    /// url和标题
     fn get_menu_from_str(&self, menu_str: String) -> Result<Vec<(Option<String>, String)>, SError>;
 
     ///
@@ -374,12 +360,62 @@ pub(crate) trait Spider {
     ///
     /// url,filename
     ///
-    fn get_img_src(&self, src: &str, img_src_prefix: String) -> Vec<(String, String)>;
+    fn get_img_src(&self, src: &str, img_src_prefix: String) -> Vec<ImgSrc> {
+        if src.is_empty() {
+            return Vec::new();
+        }
+        let v: Vec<_> = src.split("\n").collect();
+
+        v.iter()
+            .enumerate()
+            .map(|(index, url)| ImgSrc {
+                url: url.to_string(),
+                filename: format!("{}{}.jpg", img_src_prefix, index),
+            })
+            .collect()
+    }
 
     ///
     /// 修正原始的html
     ///
     fn convert_html(&self, html: String) -> String;
+
+    fn open_url(&self, url: &str) -> Result<(), SError> {
+        let mut sleep_time = self.get_arg().sleep;
+        for i in 0..self.get_arg().retry {
+            self.get_driver().get(url)?;
+            // 判断是否被cf了
+            if self
+                .get_driver()
+                .find_element(driver::By::Id("cf-error-details"))
+                .is_ok()
+                || self
+                    .get_driver()
+                    .find_element(driver::By::Css("body"))
+                    .and_then(|f| f.get_text())
+                    .map(|f| f.contains("Verifying you are human"))
+                    .unwrap_or(false)
+                || self
+                    .get_driver()
+                    .get_title()
+                    .unwrap_or_else(|_| String::new())
+                    .trim()
+                    == "Just a moment..."
+            {
+                println!("cf, waiting for refresh");
+                if i == 2 {
+                    // 最后一次
+                    return Err(SError::Message("CF".to_string()));
+                }
+                sleep(Duration::from_secs(sleep_time));
+                sleep_time = sleep_time + self.get_arg().sleep;
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 struct Wenku8 {
@@ -410,7 +446,7 @@ impl Spider for Wenku8 {
     fn get_book_info(&self) -> Result<(EpubBuilder, String, String), SError> {
         let mut book = EpubBuilder::new().custome_nav(true);
 
-        open_url(self.arg.url.to_string(), &self.driver, &self.arg)?;
+        self.open_url(self.arg.url.as_str())?;
 
         let mut title = self
             .driver
@@ -501,7 +537,7 @@ impl Spider for Wenku8 {
     }
 
     fn get_menu_str(&self, url: String) -> Result<String, SError> {
-        open_url(url, &self.driver, &self.arg)?;
+        self.open_url(url.as_str())?;
         let v :String =self.driver.execute_script(r#"return Array.from(document.getElementsByTagName('td')).filter(v=>v.innerText.trim().length>0).map(v=>{ if(v.getAttribute("class").indexOf("vcss")!=-1){   return v.innerHTML;    }else{ var a= v.childNodes[0];  return a.href +'|'+a.innerHTML;   }  }).join("\n")"#, &[])?;
         Ok(v)
     }
@@ -522,26 +558,13 @@ impl Spider for Wenku8 {
         Ok(res)
     }
 
-    fn get_img_src(&self, src: &str, img_src_prefix: String) -> Vec<(String, String)> {
-        let mut assets = Vec::new();
-        if src.trim().is_empty() {
-            return assets;
-        }
-        let s: Vec<_> = src.split("\n").collect();
-
-        for (index, url) in s.iter().enumerate() {
-            assets.push((url.to_string(), format!("{}{}.jpg", img_src_prefix, index)));
-        }
-        assets
-    }
-
     fn get_content(&self, url: String, img_src_prefix: String) -> Result<(String, String), SError> {
         // 切换新标签页
         let handle = self.driver.get_window_handle()?;
         let nw = self.driver.new_window(driver::NewWindowType::Tab)?;
         self.driver.switch_to_window((nw).as_str())?;
 
-        open_url(url.clone(), &self.driver, &self.arg)?;
+        self.open_url(url.as_str())?;
 
         let src:String = self.driver.execute_script(r#"
     for(;;){var s = document.getElementById("contentdp");if(s){s.remove();}else{break;}}
@@ -564,6 +587,217 @@ impl Spider for Wenku8 {
     }
     fn convert_html(&self, html: String) -> String {
         replace_br_html(html)
+    }
+}
+
+struct Bili {
+    driver: Driver,
+    arg: Args,
+}
+
+impl Bili {
+    fn get_host(&self) -> String {
+        "https://www.bilinovel.com".to_string()
+    }
+
+    fn get_real_url(&self, url: &str, next: bool) -> Result<String, SError> {
+        let mut url = url.to_string();
+        loop {
+            self.open_url(url.as_str())?;
+            let s: String = self.driver.execute_script(
+                "return ReadParams[arguments[0]];",
+                &[if next { "url_next" } else { "url_previous" }],
+            )?;
+            println!("next = {} {next} temp={s}", url);
+
+            if s.contains("_") {
+                url = format!("{}{}", self.get_host(), s);
+            } else {
+                url = s;
+                break;
+            }
+        }
+
+        Ok(url)
+    }
+}
+
+impl Spider for Bili {
+    fn new(driver: Driver, arg: Args) -> Self {
+        Self { driver, arg }
+    }
+
+    fn get_driver(&self) -> &Driver {
+        &self.driver
+    }
+
+    fn get_arg(&self) -> &Args {
+        &self.arg
+    }
+
+    fn get_book_id(&self) -> String {
+        self.arg
+            .url
+            .replace("https://www.bilinovel.com/novel/", "")
+            .replace(".html", "")
+    }
+
+    fn get_book_info(&self) -> Result<(EpubBuilder, String, String), SError> {
+        self.open_url(self.arg.url.as_str())?;
+        let d = self.get_driver();
+
+        let title = d
+            .find_element(driver::By::Class("book-title"))?
+            .get_text()?;
+
+        println!("title={}", title);
+        let author = d
+            .find_element(driver::By::Class("authorname"))?
+            .get_text()?;
+        let tag = d.find_element(driver::By::Class("book-meta"))?.get_text()?;
+
+        let desc = d
+            .find_element(driver::By::Id("bookSummary"))?
+            .find_element(driver::By::TagName("content"))?
+            .get_text()?;
+
+        let menu_url = d
+            .find_element(driver::By::Id("btnReadBook"))?
+            .get_property("href")?;
+
+        Ok((
+            EpubBuilder::new()
+                .with_title(&title)
+                .with_creator(&author)
+                .with_description(&desc)
+                .with_subject(&tag),
+            title,
+            menu_url.unwrap_or_else(|| String::new()),
+        ))
+    }
+
+    fn get_menu_str(&self, url: String) -> Result<String, SError> {
+        let d = self.get_driver();
+
+        // 先避开cf
+        self.open_url(url.as_str())?;
+        // 老是出现广告拦截，所以换种方案
+        d.get(format!("view-source:{url}").as_str())?;
+        println!("start xml");
+        let xml :String= d.execute_script(r#"return '<ul>'+Array.from(document.getElementById('viewsource').getElementsByTagName('span')).filter(v=>v.id.indexOf('line') !=-1).filter(v=>v.innerText.indexOf('chapter-li') !=-1).map(v=>v.innerText).join('\n')+'</ul>'"#, &[])?;
+
+        println!("xml = {xml}");
+        // 打开空白页
+        self.open_url("about:blank")?;
+
+        let str:Vec<String> = d.execute_script(r#" document.body.innerHTML=arguments[0]; return Array.from(document.getElementsByClassName('chapter-li')).filter(v=>v.className.indexOf('volume-cover')===-1).map(v=>{ if(v.className.indexOf('chapter-bar')!=-1) {return v.innerText;} else{ return v.innerText+'|'+v.getElementsByTagName('a')[0].href; }  });"#, &[xml.as_str()])?;
+
+        #[inline]
+        fn get_content_url(urls: &[String], index: usize) -> (String, bool) {
+            let mut current = index;
+            let mut next = true;
+            let mut size = 0;
+            loop {
+                if size >= urls.len() {
+                    // 找不到
+                    return (String::new(), next);
+                }
+                if urls[current].contains("|") && !urls[current].contains("java") {
+                    let real = &urls[current];
+
+                    return (
+                        real[(real.find(|f| f == '|').unwrap_or(0) + 1)..].to_string(),
+                        next,
+                    );
+                }
+                if current == 0 {
+                    next = true;
+                    current = index;
+                }
+                if next {
+                    current += 1;
+                } else {
+                    current -= 1;
+                }
+                size += 1;
+            }
+        }
+
+        let res: Vec<String> = str
+            .iter()
+            .enumerate()
+            .map(|(s_index, f)| {
+                if let Some(index) = f.find(|s| s == '|') {
+                    let title = &f[..index];
+                    let url = &f[(index + 1)..];
+                    if url.contains("javascript") {
+                        // 链接被隐藏，需要从内容页尝试获取
+                        let (next_url, mode) = get_content_url(str.as_slice(), s_index);
+                        let real: String = self
+                            .get_real_url(format!("{}{next_url}", self.get_host()).as_str(), !mode)
+                            .unwrap();
+                        format!("{title}|{}{real}", self.get_host())
+                    } else {
+                        format!("{title}|{}{url}", self.get_host())
+                    }
+                } else {
+                    f.to_string()
+                }
+            })
+            .collect();
+        Ok(res.join("\n"))
+    }
+
+    fn get_menu_from_str(&self, menu_str: String) -> Result<Vec<(Option<String>, String)>, SError> {
+        if menu_str.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let v: Vec<_> = menu_str.split("\n").collect();
+
+        Ok(v.iter()
+            .map(|f| {
+                if let Some(index) = f.find(|s| s == '|') {
+                    let title = &f[..index];
+                    let url = &f[(index + 1)..];
+                    (
+                        Some(format!(
+                            "{}{url}",
+                            if url.starts_with("http") {
+                                String::new()
+                            } else {
+                                self.get_host()
+                            }
+                        )),
+                        title.to_string(),
+                    )
+                } else {
+                    (None, f.to_string())
+                }
+            })
+            .collect())
+    }
+
+    fn get_content(&self, url: String, img_src_prefix: String) -> Result<(String, String), SError> {
+        let mut html = String::new();
+        let mut url = url;
+        loop {
+            self.open_url(url.as_str())?;
+            let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0]; Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return [ location.protocol+"//"+location.host + ReadParams.url_next, document.getElementById("acontent").innerHTML, Array.from(document.getElementById("acontent").getElementsByTagName("img")).map((v,index)=>{  var src = v.getAttribute("data-src"); v.removeAttribute("data-src");v.setAttribute("src",start + index+'.jpg'); return src    }).join("\n") ];"#, &[img_src_prefix.as_str()])?;
+            let next = &out[0];
+            html.push_str(out[1].as_str());
+            if next.contains("_") {
+                // 还要翻页
+                url = next.to_string();
+            } else {
+                break;
+            }
+        }
+        return Ok((html, String::new()));
+    }
+
+    fn convert_html(&self, html: String) -> String {
+        html
     }
 }
 
@@ -664,7 +898,7 @@ fn main() {
         Args::print_help();
         return;
     }
-    let option = FirefoxBuilder::new()
+    let mut option = FirefoxBuilder::new()
         .driver(
             format!(
                 "{}/geckodriver",
@@ -677,14 +911,29 @@ fn main() {
         )
         .disable_css()
         .disable_image()
-        .timeout(120)
-        .build();
+        .timeout(120);
+    if !arg.proxy.is_empty() {
+        option = option.proxy(Proxy::manual().ssl_proxy(&arg.proxy));
+    }
 
-    let d = Driver::new(option).unwrap();
+    let d = Driver::new(option.build()).unwrap();
 
-    let spider = Wenku8::new(d,arg);
+    let spider = Bili::new(d, arg);
+
+    // spider.open_url("https://www.bilinovel.com/novel/4188/catalog").unwrap();
+
     let id = spider.get_book_id();
 
+    // match spider.get_menu_str("https://www.bilinovel.com/novel/4188/catalog".to_string()) {
+    //     Ok(_) => {}
+    //     Err(e) => {
+    //         if let Ok(img) = spider.get_driver().take_screenshot() {
+    //             let _ = std::fs::write(format!("temp/{id}/error.png"), img);
+    //         }
+    //         sleep(Duration::from_secs(360));
+    //         panic!("{e}");
+    //     }
+    // };
     // match run(&d, arg.url.as_str(), id.as_str(), &arg) {
     match run_spider(&spider) {
         Ok((book, title)) => {
