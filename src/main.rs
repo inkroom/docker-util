@@ -14,6 +14,7 @@ use selenium::{
     driver::{self, Driver, Rect},
     option::{FirefoxBuilder, Proxy},
 };
+use std::result::Result::Ok;
 /// 腾讯云存储api
 mod cos {
     use crypto::digest::Digest;
@@ -127,8 +128,84 @@ mod cos {
                 }
             }
         }
+
+        pub fn get_object(&self, path: &str) -> Result<Vec<u8>, u16> {
+            let host = format!(
+                "https://{}.cos.ap-{}.myqcloud.com/{path}",
+                self.bucket_id, self.region
+            );
+            println!("host {host}");
+
+            match ureq::get(host)
+                .header(
+                    "Referer",
+                    std::env::var("COS_REFERER").unwrap_or("".to_string()),
+                )
+                .call()
+            {
+                Ok(mut res) => {
+                    println!("{:?}", res.headers());
+                    res.body_mut()
+                        .with_config()
+                        .limit(200 * 1024 * 1024)
+                        .read_to_vec()
+                        .map_err(|e| {
+                            log::error!("cos {:?}", e);
+                            0
+                        })
+                }
+                Err(ureq::Error::StatusCode(code)) => {
+                    if code == 404 {
+                        return Err(code);
+                    } else if code == 403 {
+                        panic!("referer not be allowed")
+                    } else {
+                        return Err(code);
+                    }
+                }
+                Err(e) => {
+                    panic!("download fail");
+                }
+            }
+        }
     }
 }
+
+// #[derive(Debug, thiserror::Error)]
+// pub enum NovelError {
+//     #[error("driver error: {e}")]
+//     Driver { e: SError },
+
+//     #[error("image download fail:{0}")]
+//     Img(String),
+
+//     #[error("Cf fail")]
+//     Cf,
+
+//     #[error("websit anti: {0}")]
+//     Anti(String),
+
+//     #[error("io: {source}")]
+//     Io {
+//         #[from]
+//         source: std::io::Error,
+//     },
+
+//     #[error("write epub fail: {0}")]
+//     Epub(iepub::prelude::IError),
+// }
+
+// impl From<SError> for NovelError {
+//     fn from(value: SError) -> Self {
+//         Self::Driver { e: value }
+//     }
+// }
+
+// impl From<iepub::prelude::IError> for NovelError {
+//     fn from(value: iepub::prelude::IError) -> Self {
+//         Self::Epub(value)
+//     }
+// }
 
 /// 生成一个短链
 fn short_url(url: &str) -> String {
@@ -137,7 +214,7 @@ fn short_url(url: &str) -> String {
     h.finish().to_string()
 }
 
-fn download_img(url: &str) -> Result<Vec<u8>, SError> {
+fn download_img(url: &str) -> anyhow::Result<Vec<u8>> {
     for i in 1..4 {
         match ureq::get(url)
             .call()
@@ -157,7 +234,7 @@ fn download_img(url: &str) -> Result<Vec<u8>, SError> {
             }
         }
     }
-    Err(SError::Http(0, "img download fail".to_string()))
+    Err(anyhow::Error::msg("img download fail"))
 }
 
 fn replace_br_html(html: String) -> String {
@@ -331,19 +408,19 @@ pub(crate) trait Spider {
     ///
     /// 书本，标题，目录页url
     ///
-    fn get_book_info(&self) -> Result<(EpubBuilder, String, String), SError>;
+    fn get_book_info(&self) -> anyhow::Result<(EpubBuilder, String, String)>;
 
     ///
     /// 获取menu的字符串形式
     ///
-    fn get_menu_str(&self, url: String) -> Result<String, SError>;
+    fn get_menu_str(&self, url: String) -> anyhow::Result<String>;
 
     ///
     /// 解析menu_str
     ///
     /// # Returns
     /// url和标题
-    fn get_menu_from_str(&self, menu_str: String) -> Result<Vec<(Option<String>, String)>, SError>;
+    fn get_menu_from_str(&self, menu_str: String) -> anyhow::Result<Vec<(Option<String>, String)>>;
 
     ///
     /// 获取content内容
@@ -355,7 +432,7 @@ pub(crate) trait Spider {
     /// # Returns
     ///
     /// 返回html和图片的src集合字符串；html应该已经处理好img src的转变
-    fn get_content(&self, url: String, img_src_prefix: String) -> Result<(String, String), SError>;
+    fn get_content(&self, url: String, img_src_prefix: String) -> anyhow::Result<(String, String)>;
 
     ///
     /// url,filename
@@ -386,7 +463,7 @@ pub(crate) trait Spider {
     ///
     fn convert_html(&self, html: String) -> String;
 
-    fn open_url(&self, url: &str) -> Result<(), SError> {
+    fn open_url(&self, url: &str) -> anyhow::Result<()> {
         let mut sleep_time = self.get_arg().sleep;
         for i in 0..self.get_arg().retry {
             self.get_driver().get(url)?;
@@ -414,7 +491,7 @@ pub(crate) trait Spider {
                 log::info!("cf, waiting for refresh");
                 if i == 2 {
                     // 最后一次
-                    return Err(SError::Message("CF".to_string()));
+                    return Err(anyhow::Error::msg("CF"));
                 }
                 sleep(Duration::from_secs(sleep_time));
                 sleep_time = sleep_time + self.get_arg().sleep;
@@ -430,7 +507,7 @@ pub(crate) trait Spider {
         &self,
         src: &str,
         img_filename_prefix: String,
-    ) -> Result<Vec<(String, Vec<u8>)>, SError> {
+    ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
         let mut assets = Vec::new();
         let img = self.get_img_src(src, img_filename_prefix);
         for i in img {
@@ -453,7 +530,9 @@ pub(crate) trait Spider {
         Ok(assets)
     }
 
-    fn run(&self) -> Result<(EpubBuilder, String), SError> {
+    fn run(&self) -> anyhow::Result<()> {
+        self.download_cache()?;
+
         let id = self.get_book_id();
         std::fs::create_dir_all(format!("temp/{id}/{}", ImgSrc::dir_name()))?;
 
@@ -542,7 +621,127 @@ pub(crate) trait Spider {
             builder = builder.add_nav(ele);
         }
 
-        Ok((builder, title))
+        let out = self.write_epub(builder, title.as_str())?;
+
+        self.upload(out, title.as_str())
+    }
+
+    fn write_epub(&self, book: EpubBuilder, title: &str) -> anyhow::Result<String> {
+        let f = format!("out/{}.epub", title);
+        log::info!("writing epub book to file {f}");
+        let _ = std::fs::create_dir_all("out");
+        book.file(f.as_str())?;
+        Ok(f)
+    }
+
+    fn upload(&self, epub_file: String, title: &str) -> anyhow::Result<()> {
+        let id = self.get_book_id();
+        // 上传到cos
+        let remote = format!(
+            "epub/data/{}/{id}/{title}.epub",
+            iepub::DateTimeFormater::default()
+                .with_timezone_offset(8)
+                .format("%Y-%M-%d"),
+        );
+        if !self.get_arg().no_upload {
+            log::info!("upload file to cos {remote}");
+            let client = cos::CosClient::new();
+            client.put_object(&remote, std::fs::read(&epub_file).unwrap());
+            let remote = format!("epub/data/cache/{id}.zip");
+            if !self.get_arg().no_upload_cache {
+                log::info!("uploda cache dir to cos {}", remote);
+                let temp = format!(
+                    "{}/novel-{id}-{}.zip",
+                    std::env::temp_dir().display(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|f| f.as_millis())
+                        .unwrap_or(0)
+                );
+                // 压缩目录
+                let mut writer = std::fs::OpenOptions::new()
+                    .create_new(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(&temp)
+                    .expect("zip file create fail");
+                {
+                    let mut zip_w: zip::ZipWriter<&mut std::fs::File> =
+                        zip::ZipWriter::new(&mut writer);
+                    zip(&mut zip_w, format!("temp/{id}/").as_str()).expect("zip file fail");
+                }
+                client.put_object(&remote, std::fs::read(&temp)?);
+            }
+        }
+        Ok(())
+    }
+
+    fn download_cache(&self) -> anyhow::Result<()> {
+        let id = self.get_book_id();
+        let base_dir = format!("temp/{id}");
+        if std::fs::metadata(&base_dir)
+            .map(|f| f.is_dir())
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+
+        let remote = format!("epub/data/cache/{id}.zip");
+
+        let client = cos::CosClient::new();
+        match client.get_object(&remote) {
+            Ok(data) => {
+                log::info!("extract cache zip {}", data.len());
+                std::fs::write("1.zip", data.as_slice()).unwrap();
+                // 解压zip
+                let mut archive = zip::ZipArchive::new(std::io::Cursor::new(data))?;
+
+                for i in 0..archive.len() {
+                    let mut file = archive.by_index(i).unwrap();
+                    let outpath = match file.enclosed_name() {
+                        Some(path) => path,
+                        None => continue,
+                    };
+
+                    let outpath =
+                        std::path::PathBuf::from(format!("{base_dir}/{}", outpath.display()));
+                    log::info!("extract file {}", outpath.display());
+                    if file.is_dir() {
+                        std::fs::create_dir_all(&outpath).unwrap();
+                    } else {
+                        if let Some(p) = outpath.parent() {
+                            if !p.exists() {
+                                std::fs::create_dir_all(p).unwrap();
+                            }
+                        }
+                        let mut outfile = std::fs::File::create(&outpath).unwrap();
+                        std::io::copy(&mut file, &mut outfile).unwrap();
+                    }
+
+                    // Get and Set permissions
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+
+                        if let Some(mode) = file.unix_mode() {
+                            std::fs::set_permissions(
+                                &outpath,
+                                std::fs::Permissions::from_mode(mode),
+                            )?;
+                        }
+                    }
+                }
+
+                Ok(())
+            }
+            Err(code) => {
+                if code == 404 {
+                    log::warn!("not found cache from remote {remote}");
+                    return Ok(());
+                }
+                panic!("download cache fail {code}")
+            }
+        }
     }
 }
 
@@ -575,7 +774,7 @@ impl Spider for Wenku8 {
         &self.arg
     }
 
-    fn get_book_info(&self) -> Result<(EpubBuilder, String, String), SError> {
+    fn get_book_info(&self) -> anyhow::Result<(EpubBuilder, String, String)> {
         let mut book = EpubBuilder::new().custome_nav(true);
 
         self.open_url(self.arg.url.as_str())?;
@@ -604,7 +803,7 @@ impl Spider for Wenku8 {
         }
         log::info!("book name = {}", title);
         if title.trim().is_empty() {
-            return Err(SError::Driver("get book title fail".to_string()));
+            return Err(anyhow::Error::msg("get book title fail"));
         }
         book = book.with_title(&title);
 
@@ -668,13 +867,13 @@ impl Spider for Wenku8 {
         Ok((book, title, url))
     }
 
-    fn get_menu_str(&self, url: String) -> Result<String, SError> {
+    fn get_menu_str(&self, url: String) -> anyhow::Result<String> {
         self.open_url(url.as_str())?;
         let v :String =self.driver.execute_script(r#"return Array.from(document.getElementsByTagName('td')).filter(v=>v.innerText.trim().length>0).map(v=>{ if(v.getAttribute("class").indexOf("vcss")!=-1){   return v.innerHTML;    }else{ var a= v.childNodes[0];  return a.href +'|'+a.innerHTML;   }  }).join("\n")"#, &[])?;
         Ok(v)
     }
 
-    fn get_menu_from_str(&self, menu_str: String) -> Result<Vec<(Option<String>, String)>, SError> {
+    fn get_menu_from_str(&self, menu_str: String) -> anyhow::Result<Vec<(Option<String>, String)>> {
         let mut res = Vec::new();
         let menu: Vec<_> = menu_str.split("\n").collect();
         for ele in menu {
@@ -690,7 +889,7 @@ impl Spider for Wenku8 {
         Ok(res)
     }
 
-    fn get_content(&self, url: String, img_src_prefix: String) -> Result<(String, String), SError> {
+    fn get_content(&self, url: String, img_src_prefix: String) -> anyhow::Result<(String, String)> {
         // 切换新标签页
         let handle = self.driver.get_window_handle()?;
         let nw = self.driver.new_window(driver::NewWindowType::Tab)?;
@@ -741,7 +940,7 @@ impl Bili {
         "https://www.bilinovel.com".to_string()
     }
 
-    fn get_real_url(&self, url: &str, next: bool) -> Result<String, SError> {
+    fn get_real_url(&self, url: &str, next: bool) -> anyhow::Result<String> {
         let mut url = url.to_string();
         loop {
             println!("real url = {}", url);
@@ -780,7 +979,7 @@ impl Spider for Bili {
             .replace(".html", "")
     }
 
-    fn get_book_info(&self) -> Result<(EpubBuilder, String, String), SError> {
+    fn get_book_info(&self) -> anyhow::Result<(EpubBuilder, String, String)> {
         let sep = "|||";
         let cache = format!(
             "temp/{}/{}.b",
@@ -851,58 +1050,11 @@ impl Spider for Bili {
         ))
     }
 
-    fn open_url(&self, url: &str) -> Result<(), SError> {
-        let mut sleep_time = self.get_arg().sleep;
-        for i in 0..self.get_arg().retry {
-            self.get_driver().get(url)?;
-            // 判断是否被cf了
-            if self
-                .get_driver()
-                .find_element(driver::By::Id("cf-error-details"))
-                .is_ok()
-                || self
-                    .get_driver()
-                    .find_element(driver::By::Css("body"))
-                    .and_then(|f| f.get_text())
-                    .map(|f| f.contains("Verifying you are human"))
-                    .unwrap_or(false)
-                || self
-                    .get_driver()
-                    .execute_script("return !!window._cf_chl_opt;", &[])?
-                || self
-                    .get_driver()
-                    .get_title()
-                    .unwrap_or_else(|_| String::new())
-                    .trim()
-                    == "Just a moment..."
-            // || self
-            //     .get_driver()
-            //     .find_element(driver::By::Id("acontent"))
-            //     .and_then(|f| f.get_text())
-            //     .map(|f| {println!("t={f}"); f.contains("客戶端停用中")})//有时候会出现 正文部分内容被屏蔽
-            //     .unwrap_or(false)
-            {
-                log::info!("cf, waiting for refresh");
-                if i == 2 {
-                    // 最后一次
-                    return Err(SError::Message("CF".to_string()));
-                }
-                sleep(Duration::from_secs(sleep_time));
-                sleep_time = sleep_time + self.get_arg().sleep;
-            } else {
-                break;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn get_menu_str(&self, url: String) -> Result<String, SError> {
+    fn get_menu_str(&self, url: String) -> anyhow::Result<String> {
         let d = self.get_driver();
 
         // 先避开cf
         self.open_url(url.as_str())?;
-        // 老是出现广告拦截，所以换种方案
 
         let str :Vec<HashMap<String,String>> = d.execute_script(r#"return Array.from(document.getElementsByClassName("chapter-li")).filter(v=> v.className.indexOf("volume-cover") === -1)
 .map(li=>{
@@ -993,7 +1145,7 @@ impl Spider for Bili {
         Ok(res.join("\n"))
     }
 
-    fn get_menu_from_str(&self, menu_str: String) -> Result<Vec<(Option<String>, String)>, SError> {
+    fn get_menu_from_str(&self, menu_str: String) -> anyhow::Result<Vec<(Option<String>, String)>> {
         if menu_str.is_empty() {
             return Ok(Vec::new());
         }
@@ -1023,7 +1175,7 @@ impl Spider for Bili {
             .collect())
     }
 
-    fn get_content(&self, url: String, img_src_prefix: String) -> Result<(String, String), SError> {
+    fn get_content(&self, url: String, img_src_prefix: String) -> anyhow::Result<(String, String)> {
         let mut html = String::new();
         let mut url = url;
         let mut src = String::new();
@@ -1039,7 +1191,7 @@ impl Spider for Bili {
                     break;
                 } else {
                     if j == 2 {
-                        return Err(SError::Browser("content sub".to_string()));
+                        return Err(anyhow::Error::msg("content sub"));
                     }
                     log::info!("contnet sub refresh {j}");
                     self.driver.refresh()?;
@@ -1074,7 +1226,7 @@ impl Spider for Bili {
         &self,
         src: &str,
         img_filename_prefix: String,
-    ) -> Result<Vec<(String, Vec<u8>)>, SError> {
+    ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
         use enigo::{
             Direction::{Click, Press, Release},
             Enigo, Key, Keyboard, Settings,
@@ -1143,7 +1295,7 @@ impl Spider for Bili {
                         .unwrap();
                     sleep(Duration::from_secs(wait));
                 } else if j == count - 1 {
-                    return Err(SError::Browser("img load fail, retry ".to_string()));
+                    return Err(anyhow::Error::msg("img load fail, retry "));
                 } else {
                     log::info!("complete img = {}", r);
                     if r.trim().is_empty() {
@@ -1205,7 +1357,7 @@ impl Spider for Bili {
                         .unwrap();
                         sleep(Duration::from_secs(2));
                         if !std::fs::exists(&download_path).unwrap_or(false) {
-                            return Err(SError::Message("download img fail 2".to_string()));
+                            return Err(anyhow::Error::msg("download img fail 2"));
                         }
 
                         let v: Vec<_> = s[0].split("-").collect();
@@ -1237,7 +1389,7 @@ impl Spider for Bili {
 
         if undownload_img.len() > 0 {
             log::warn!("img not be download all, {:?}", undownload_img);
-            return Err(SError::Browser("download img fail".to_string()));
+            return Err(anyhow::Error::msg("download img fail"));
         }
 
         // 读取图片
@@ -1245,241 +1397,63 @@ impl Spider for Bili {
             assets.push((ele.epub_path(), std::fs::read(ele.cache_path())?));
         }
         return Ok(assets);
-
-        // if img
-        //     .iter()
-        //     .skip(1)
-        //     // .map(|f| format!("temp/{id}/Images/{}", f.filename))
-        //     .map(|f| std::fs::exists(f.cache_path()).unwrap_or(false))
-        //     .all(|f| f)
-        // {
-        //     // 图片都下载了
-        //     for ele in img.iter().skip(1).map(|f| {
-        //         (
-        //             f.filename.clone(),
-        //             format!("temp/{id}/Images/{}", f.filename),
-        //         )
-        //     }) {
-        //         assets.push((format!("Images/{}", ele.0), std::fs::read(ele.1)?));
-        //     }
-        //     return Ok(assets);
-        // } else {
-        //     // 加载图片
-        //     let i = &img[0];
-
-        //     let url = &i.url;
-        //     if url.ends_with(".html") {
-        //         log::info!("loading img = {url}");
-        //         self.open_url(url.as_str())?;
-        //         let mut wait = self.get_arg().sleep;
-        //         let count = 10;
-        //         for j in 0..count {
-        //             // 首先判断内容截断，然后处理图片，再判断图片加载
-        //             let r: isize = self.get_driver().execute_script(
-        //                     r#"document.getElementById('acontent').removeAttribute('style'); if(document.getElementById('acontent').innerText.indexOf("客戶端停用中")!=-1) {  return -2;}  else {  Array.from(document.getElementsByClassName("imagecontent")).map((v,index)=>{ v.setAttribute('id','img-'+(index));  v.setAttribute('src', v.getAttribute('data-src') );return v; }); return Array.from(document.getElementsByClassName("imagecontent")).map(v=>{return {r:v.complete,v:v};}).filter(v=>v.r && v.v.naturalWidth != 0).length  ; } "#,
-        //                     &[],
-        //                 ).unwrap();
-        //             if r == -2 {
-        //                 log::info!("content sub refresh {j}");
-        //                 // self.get_driver().refresh()?;
-        //                 let _: () = self
-        //                     .get_driver()
-        //                     .execute_script("location.reload();", &[])
-        //                     .unwrap();
-        //                 sleep(Duration::from_secs(wait));
-        //             } else if j == count - 1 {
-        //                 return Err(SError::Browser("img load fail".to_string()));
-        //             } else if r != ((img.len() - 1) as isize) {
-        //                 log::info!("waiting img load = {j} complete = {r}/{}", img.len() - 1);
-        //                 // 睡眠等待
-        //                 sleep(Duration::from_secs(wait));
-        //             } else {
-        //                 break;
-        //             }
-        //             wait = wait + self.get_arg().sleep;
-        //         }
-        //     }
-        // }
-
-        // let mut enigo = enigo::Enigo::new(&enigo::Settings::default()).unwrap();
-
-        // for (index, i) in img.iter().skip(1).enumerate() {
-        //     // self.open_url("https://www.bilinovel.com/novel/3095/154931_1.html")?;
-
-        //     // let c = self.driver.find_element(driver::By::Id("acontent"))?;
-        //     // let imgs = c.find_elements(driver::By::Css("img"))?;
-        //     // self.driver.set_window_rect(Rect::size(1024.0, 20480.0))?;
-        //     // let a = self
-        //     //     .driver
-        //     //     .actions()
-        //     //     .move_pointer(&imgs[0])
-        //     //     .context_click(Some(&imgs[0]))
-        //     //     .perform()?;
-        //     // sleep(Duration::from_secs(3));
-        //     // self.driver
-        //     //     .actions()
-        //     //     .key_down("v")
-        //     //     .key_pause(1)
-        //     //     .key_up("v")
-        //     //     .perform()?;
-
-        //     // sleep(Duration::from_secs(30));
-
-        //     //            let base:String = match self.driver.execute_script(r#"function imgToBase64(img) {
-        //     //              // 创建一个canvas元素
-        //     //              const canvas = document.createElement('canvas');
-        //     //              const ctx = canvas.getContext('2d');
-
-        //     //              // 设置canvas尺寸与图片尺寸相同
-        //     //              canvas.width = img.width;
-        //     //              canvas.height = img.height;
-
-        //     //              // 将图片绘制到canvas上
-        //     //              ctx.drawImage(img, 0, 0);
-
-        //     //              // 返回图像的base64表示
-        //     //              return canvas.toDataURL();
-        //     //            }
-
-        //     //            // 使用方法
-        //     //            var imgElement = document.getElementById('acontent').getElementsByTagName('img')[0];
-        //     //            canvas.width = imgElement.naturalWidth;
-        //     //             canvas.height = imgElement.naturalHeight;
-
-        //     //             // 将图像绘制到canvas上
-        //     //             ctx.drawImage(imgElement, 0, 0);
-        //     //             var base64 = canvas.toDataURL('image/png');
-        //     //             console.log(base64);
-        //     //             return base64;"#, &[i.url.as_str()]) {
-        //     //                Ok(b) => {b},
-        //     //                Err(e) => {
-
-        //     // sleep(Duration::from_secs(20));
-        //     // panic!("{e}");
-        //     //                },
-        //     //            };
-
-        //     // log::info!("base ={}",base);
-        //     let url = &i.url;
-        //     let filename = &i.filename;
-        //     let d: Vec<_> = url.split('/').collect();
-
-        //     // let download = format!("/root/下载/{}", d.last().unwrap_or(&"no.jpg"));
-
-        //     let f = format!("temp/{id}/Images/{}", filename);
-        //     log::info!("download firefox = {}", f);
-
-        //     if !std::fs::exists(&f).unwrap_or(false) {
-        //         use enigo::{
-        //             Direction::{Click, Press, Release},
-        //             Enigo, Key, Keyboard, Settings,
-        //         };
-
-        //         // 利用id跳转到img
-        //         let _: () = self.get_driver().execute_script(
-        //             r#"document.getElementById('acontent').removeAttribute('style');  location.hash='img-' + arguments[0]; "#,
-        //             &[index.to_string().as_str()],
-        //         )?;
-        //         log::info!("mouse");
-        //         sleep(Duration::from_secs(1));
-        //         // 执行下载操作
-        //         enigo::Mouse::move_mouse(&mut enigo, 500, 200, enigo::Coordinate::Abs).unwrap();
-        //         enigo::Mouse::button(&mut enigo, enigo::Button::Right, enigo::Direction::Click)
-        //             .unwrap();
-        //         sleep(Duration::from_secs(1));
-        //         enigo::Keyboard::key(
-        //             &mut enigo,
-        //             enigo::Key::Unicode('v'),
-        //             enigo::Direction::Click,
-        //         )
-        //         .unwrap();
-        //         sleep(Duration::from_secs(3));
-
-        //         // 全选删除
-        //         enigo.key(Key::Control, Press).unwrap();
-        //         enigo.key(Key::Unicode('a'), Click).unwrap();
-        //         enigo.key(Key::Control, Release).unwrap();
-
-        //         sleep(Duration::from_secs(1));
-        //         enigo.key(Key::Delete, Click).unwrap();
-        //         // 输入下载位置
-        //         enigo
-        //             .text(format!("{}/{f}", std::env::current_dir().unwrap().display()).as_str())
-        //             .unwrap();
-
-        //         enigo::Keyboard::key(&mut enigo, enigo::Key::Return, enigo::Direction::Click)
-        //             .unwrap();
-        //         sleep(Duration::from_secs(13));
-        //         if !std::fs::exists(&f).unwrap_or(false) {
-        //             panic!("fail");
-        //         }
-        //     }
-
-        //     if std::fs::exists(&f).unwrap_or(false) {
-        //         let t = std::fs::read(&f)?;
-        //         assets.push((format!("Images/{}", filename), t));
-        //         continue;
-        //     }
-        //     log::info!("downloading img from {url} to {f}");
-
-        //     let old = self.get_driver().get_window_handle()?;
-        //     let new = self.get_driver().new_window(driver::NewWindowType::Tab)?;
-        //     self.get_driver().switch_to_window(new.as_str())?;
-
-        //     self.open_url(&url)?;
-        //     let base64:String = self.get_driver().execute_async_script(r#"var callback=arguments[arguments.length-1]; var img = new Image();img.src = location.href; img.onload = function(){  var c = document.createElement("canvas"); var ctx = c.getContext("2d"); c.height = img.naturalHeight; c.width = img.naturalWidth; ctx.drawImage(img,0,0); callback(c.toDataURL());  }  "#, &[])?;
-
-        //     if let Some(i) = base64.find(|f| f == ',') {
-        //         // base64 转 u8
-
-        //         let v = selenium::base64::decode(&base64[(i + 1)..].as_bytes());
-        //         std::fs::write(&f, &v).unwrap();
-
-        //         assets.push((format!("Images/{}", filename), v));
-        //     }
-        //     self.get_driver().close_window()?;
-        //     self.get_driver().switch_to_window(old.as_str())?;
-        // }
-        // Ok(assets)
     }
 }
 
 fn zip<W: std::io::Write + std::io::Seek>(
+    zip: &mut zip::ZipWriter<&mut W>,
+    current: &str,
+) -> anyhow::Result<()> {
+    use std::io::Write;
+    fn zip_inner<W: std::io::Write + std::io::Seek>(
         zip: &mut zip::ZipWriter<&mut W>,
         current: &str,
-    ) -> Result<(), SError> {
-        use std::io::Write;
-        fn zip_inner<W:std::io::Write + std::io::Seek> (
-            zip: &mut zip::ZipWriter<&mut W>,
-            current: &str,
-            dir: &str,
-        ) -> Result<(), SError> {
-            let options = zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored)
-                .unix_permissions(0o755);
-            if let Ok(meta) = std::fs::metadata(current) {
-                if meta.is_file() {
-                    zip.start_file(current.replace(dir, ""), options).unwrap();
-                    let mut b = std::fs::read(current)?;
-                    zip.write_all(&mut b).unwrap();
-                } else if meta.is_dir() {
-                    let entries = std::fs::read_dir(current)?
-                        .map(|res| res.map(|e| e.path()))
-                        .collect::<Result<Vec<_>, std::io::Error>>()?;
+        dir: &str,
+    ) -> anyhow::Result<()> {
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .unix_permissions(0o755);
+        if let Ok(meta) = std::fs::metadata(current) {
+            if meta.is_file() {
+                zip.start_file(current.replace(dir, ""), options).unwrap();
+                let mut b = std::fs::read(current)?;
+                zip.write_all(&mut b).unwrap();
+            } else if meta.is_dir() {
+                let entries = std::fs::read_dir(current)?
+                    .map(|res| res.map(|e| e.path()))
+                    .collect::<Result<Vec<_>, std::io::Error>>()?;
 
-                    for ele in entries {
-                        zip_inner(zip, format!("{}", ele.display()).as_str(), dir)?;
-                    }
+                for ele in entries {
+                    zip_inner(zip, format!("{}", ele.display()).as_str(), dir)?;
                 }
             }
-            Ok(())
         }
-
-        zip_inner(zip, current, current)
+        Ok(())
     }
 
+    zip_inner(zip, current, current)
+}
+
 fn main() {
-    let mut arg = Args::parse();
+    use std::io::Write;
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "{} {}[{}:{}]: {}",
+                iepub::DateTimeFormater::default()
+                    .with_timezone_offset(8)
+                    .format("%Y-%M-%d %H:%m:%s"),
+                record.module_path().unwrap_or(""),
+                record.line().unwrap_or(0),
+                record.level(),
+                record.args()
+            )
+        })
+        .filter_module("enigo", log::LevelFilter::Off)
+        .init();
+
+    let arg = Args::parse();
     if arg.help {
         Args::print_help();
         return;
@@ -1496,21 +1470,7 @@ fn main() {
             .as_str(),
         )
         .disable_css()
-        .set_profile("/root/.mozilla/firefox/d36562v6.default")
-        .unwrap()
-        .url("http://127.0.0.1:44989")
         .add_pref_string("intl.accepg_languages", "zh-CN,en-US")
-        .add_pref_i32("browser.download.folderList", 0)
-        .add_pref_string(
-            "bowser.download.dir",
-            "/workspaces/docker-util/temp/firefox",
-        )
-        .add_pref_string(
-            "bowser.download.lastDir",
-            "/workspaces/docker-util/temp/firefox",
-        )
-        // .head_less()
-        // .disable_image()
         .timeout(120);
     if !arg.proxy.is_empty() {
         option = option.proxy(Proxy::manual().ssl_proxy(&arg.proxy));
@@ -1526,51 +1486,10 @@ fn main() {
         panic!("unsupport url")
     };
 
-    // spider.open_url("https://www.bilinovel.com/novel/4188/catalog").unwrap();
-
     let id = spider.get_book_id();
 
     match spider.run() {
-        Ok((book, title)) => {
-            let f = format!("out/{}.epub", title);
-            log::info!("writing epub book to file {f}");
-            let _ = std::fs::create_dir_all("out");
-            book.file(f.as_str()).unwrap();
-
-            // 上传到cos
-            let remote = format!(
-                "epub/data/{}/{id}/{title}.epub",
-                iepub::DateTimeFormater::default()
-                    .with_timezone_offset(8)
-                    .format("%Y-%M-%d")
-            );
-            if !spider.get_arg().no_upload {
-                log::info!("upload file to cos {remote}");
-                cos::CosClient::new().put_object(&remote, std::fs::read(f.as_str()).unwrap());
-                let remote = format!("epub/data/cache/{id}.zip");
-                if !spider.get_arg().no_upload_cache {
-                    log::info!("uploda cache dir to cos {}",remote);
-                    let temp = format!(
-                        "{}/novel-{id}-{}.zip",
-                        std::env::temp_dir().display(),
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|f| f.as_millis())
-                            .unwrap_or(0)
-                    );
-                    // 压缩目录
-                    let mut writer = std::fs::OpenOptions::new().create_new(true).truncate(true).write(true).open(&temp).expect ("zip file create fail");
-                    {
-                        let mut zip_w: zip::ZipWriter<&mut std::fs::File> =
-                            zip::ZipWriter::new(&mut writer);
-
-                        zip(&mut zip_w, &temp).expect("zip file fail");
-                    }
-                    cos::CosClient::new().put_object(&remote, std::fs::read(&temp).unwrap());
-                    
-                }               
-            }
-        }
+        Ok(()) => {}
         Err(e) => {
             if let Ok(img) = spider.get_driver().take_screenshot() {
                 let _ = std::fs::write(format!("temp/{id}/error.png"), img);
