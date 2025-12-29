@@ -27,7 +27,7 @@ RUN echo "LC_ALL=zh_CN.UTF-8" >> /etc/environment && \
     echo "export LANG=zh_CN.UTF-8" >> /etc/profile && \
     echo "export LANGUAGE=zh_CN:en_US" >> /etc/profile 
 
-RUN sh /app/scripts/prepare_firefox_ppa.sh && apt update -y && apt install -y firefox
+RUN sh /app/scripts/prepare_firefox_ppa.sh && apt update -y && apt install -y firefox build-essential cmake perl pkg-config libclang-dev musl-tools 
 COPY --from=build /app/target/release/wenku /app/exec
 COPY --from=build /geckodriver /app/
 WORKDIR /app/

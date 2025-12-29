@@ -4,12 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iepub = "1.0.1"
+iepub = "1.2.6"
 rust-crypto = "0.2.36"
-selenium = { git = "https://github.com/inkroom/selenium-rs", rev="b309a97962c8f4ce752d05720915f281dc26969b", features = ["profile"], version = "^0.1.0" }
+selenium = { git = "https://github.com/inkroom/selenium-rs", rev="109356a3f52f16118bb1c34c063bf2e69d27456b", features = ["profile"], version = "^0.1.0" }
 ureq = "3.0.12"
 enigo = "0.5.0"
 env_logger = "0.11.8"
 log = "0.4.27"
 zip = "4.3.0"
 anyhow = "1.0.98"
+regex = "1.12.2"
+wreq = "5.3.0"
+wreq-util = "2.2.6"
+tokio = "1.48.0"
