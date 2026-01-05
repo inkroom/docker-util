@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
-    io::Write,
+    io::{BufRead, Read, Write},
     thread::sleep,
     time::Duration,
 };
@@ -105,22 +105,22 @@ mod cos {
             )
         }
 
-        pub fn put_object(&self, path: &str, data: Vec<u8>) -> bool {
+        pub fn put_object(&self, path: &str, data: &[u8]) -> bool {
             // let path ;
             let host = format!(
                 "https://{}.cos.ap-{}.myqcloud.com",
                 self.bucket_id, self.region
             );
             let r = self.sign("put", path, 3600).unwrap();
-            match ureq::put(format!("{}/{}", host, path.replace(" ", "%20")))
-                .header("Authorization", &r)
-                .send(data)
+            match ureq::put(format!(
+                "{}/{}",
+                host,
+                path.replace("%", "%25").replace(" ", "%20")
+            ))
+            .header("Authorization", &r)
+            .send(data)
             {
-                Ok(_res) => {
-                    // log::info!("{:?}", res);
-                    // log::info!("body {:?}", res.body_mut().read_to_string());
-                    true
-                }
+                Ok(res) => res.status().is_success(),
                 Err(e) => {
                     panic!("{:?}", e);
                 }
@@ -165,6 +165,17 @@ mod cos {
                     panic!("download fail {:?}", e);
                 }
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::cos::CosClient;
+
+        #[test]
+        fn test() {
+            let s = [0u8; 10];
+            CosClient::new().put_object("epub/data/2025-12-31/www.bilinovel.com%2Fnovel%2F3095.html/3095/败北女角太多了！.epub", s.to_vec());
         }
     }
 }
@@ -212,6 +223,28 @@ fn hash_url(url: &str) -> String {
     h.finish().to_string()
 }
 
+fn url_encode(input: &str) -> String {
+    let mut encoded = String::new();
+    for c in input.chars() {
+        if c.is_alphanumeric()
+            || c == '-'
+            || c == '_'
+            || c == '.'
+            || c == '!'
+            || c == '~'
+            || c == '*'
+            || c == '\''
+            || c == '('
+            || c == ')'
+        {
+            encoded.push(c);
+        } else {
+            encoded.push_str(&format!("%{:02X}", c as u8));
+        }
+    }
+    encoded
+}
+
 #[derive(Debug)]
 struct Args {
     /// 获取的标题部分，0全部，1括号外的，2括号里的，默认为1
@@ -232,6 +265,10 @@ struct Args {
     new_title: String,
     /// 不处理图片
     no_img: bool,
+    /// 强制更新目录
+    update_menu: bool,
+    /// 强制更新内容
+    update_content: bool,
 }
 
 impl Args {
@@ -247,6 +284,8 @@ impl Args {
             new_title: String::new(),
             no_img: false,
             no_upload_cache: false,
+            update_menu: false,
+            update_content: false,
         }
     }
 
@@ -256,6 +295,8 @@ impl Args {
         log::info!("--");
         log::info!("\t--title\t获取的标题部分，0全部，1括号外的，2括号里的，默认为1");
         log::info!("\t--no-up\t不上传");
+        log::info!("\t--um\t强制更新目录");
+        log::info!("\t--uc\t强制更新内容");
         log::info!("\t--sleep\t等待cf时间，单位秒，默认5秒");
         log::info!("\t--retry\t重试cf次数，默认3");
         log::info!("\t--proxy\t代理，如host:port");
@@ -316,6 +357,10 @@ impl Args {
                 res.proxy = iter.next().expect("--proxy host:port").to_string();
             } else if arg == "--nt" {
                 res.new_title = iter.next().expect("--nt json").to_string();
+            } else if arg == "--um" {
+                res.update_menu = true;
+            } else if arg == "--uc" {
+                res.update_content = true;
             } else {
                 res.url = arg.to_string();
             }
@@ -524,7 +569,9 @@ pub(crate) trait Spider {
         // 获取bookInfo
         let (mut builder, title, menu_url) = self.get_book_info()?;
         // 获取menu_str
-        let menu_str: String = if let Ok(menu_str) = std::fs::read_to_string(menu_temp.as_str()) {
+        let menu_str: String = if !self.get_arg().update_menu
+            && let Ok(menu_str) = std::fs::read_to_string(menu_temp.as_str())
+        {
             menu_str
         } else {
             log::info!("get menu from {}", menu_url);
@@ -549,7 +596,8 @@ pub(crate) trait Spider {
                 let html_temp = format!("temp/{id}/{:03}-{}.h", index, hash_url(url.as_str()));
                 let src_temp = format!("temp/{id}/{:03}-{}.s", index, hash_url(url.as_str()));
 
-                let (html, assets) = if let Ok(html) = std::fs::read_to_string(html_temp.as_str())
+                let (html, assets) = if !self.get_arg().update_content
+                    && let Ok(html) = std::fs::read_to_string(html_temp.as_str())
                     && let Some(src) = std::fs::exists(src_temp.as_str())
                         .ok()
                         .map(|f| if f { Some(f) } else { None })
@@ -603,7 +651,6 @@ pub(crate) trait Spider {
                         .with_data(html.as_bytes().to_vec()),
                 );
                 for ele in assets {
-                    log::info!("add img {} {} {}", ele.0, html_temp, src_temp);
                     builder = builder.add_assets(ele.0.as_str(), ele.1);
                 }
 
@@ -651,23 +698,31 @@ pub(crate) trait Spider {
         let id = self.get_book_id();
         // 上传到cos
         let remote = format!(
-            "epub/data/{}/{}/{id}/{title}.epub",
+            "epub/data/{title}/{}/{}/{title}.epub",
             iepub::DateTimeFormater::default()
                 .with_timezone_offset(8)
                 .format("%Y-%M-%d"),
-            self.get_url()
-                .replace("http://", "")
-                .replace("https://", ""),
+            url_encode(
+                self.get_url()
+                    .replace("http://", "")
+                    .replace("https://", "")
+                    .as_str()
+            ),
         );
         if !self.get_arg().no_upload {
             log::info!("upload file to cos {remote}");
             let client = cos::CosClient::new();
-            client.put_object(&remote, std::fs::read(&epub_file).unwrap());
+            if !client.put_object(&remote, &std::fs::read(&epub_file).unwrap()) {
+                log::warn!("upload file fail");
+            };
             let remote = format!(
                 "epub/data/cache/{}/{id}.zip",
-                self.get_url()
-                    .replace("http://", "")
-                    .replace("https://", "")
+                url_encode(
+                    self.get_url()
+                        .replace("http://", "")
+                        .replace("https://", "")
+                        .as_str()
+                )
             );
             if !self.get_arg().no_upload_cache {
                 log::info!("uploda cache dir to cos {}", remote);
@@ -691,7 +746,23 @@ pub(crate) trait Spider {
                         zip::ZipWriter::new(&mut writer);
                     zip(&mut zip_w, format!("temp/{id}/").as_str()).expect("zip file fail");
                 }
-                client.put_object(&remote, std::fs::read(&temp)?);
+                let zip_data = std::fs::read(&temp)?;
+                if !client.put_object(&remote, &zip_data) {
+                    log::warn!("upload file fail");
+                };
+                let remote = format!(
+                    "epub/data/cache/{}/{}/{id}.zip",
+                    url_encode(
+                        self.get_url()
+                            .replace("http://", "")
+                            .replace("https://", "")
+                            .as_str()
+                    ),
+                    iepub::DateTimeFormater::default()
+                        .with_timezone_offset(8)
+                        .format("%Y-%M-%d"),
+                );
+                let _ = client.put_object(&remote, &zip_data);
             }
         }
         Ok(())
@@ -711,9 +782,12 @@ pub(crate) trait Spider {
         // }
         let remote = format!(
             "epub/data/cache/{}/{id}.zip",
-            self.get_url()
-                .replace("http://", "")
-                .replace("https://", ""),
+            url_encode(
+                self.get_url()
+                    .replace("http://", "")
+                    .replace("https://", "")
+                    .as_str()
+            ),
         );
 
         let client = cos::CosClient::new();
@@ -738,9 +812,10 @@ pub(crate) trait Spider {
                         std::fs::create_dir_all(&outpath).unwrap();
                     } else {
                         if let Some(p) = outpath.parent()
-                            && !p.exists() {
-                                std::fs::create_dir_all(p).unwrap();
-                            }
+                            && !p.exists()
+                        {
+                            std::fs::create_dir_all(p).unwrap();
+                        }
                         let mut outfile = std::fs::File::create(&outpath).unwrap();
                         std::io::copy(&mut file, &mut outfile).unwrap();
                     }
@@ -831,13 +906,15 @@ impl Spider for Wenku8 {
             let end = title.find(')');
             if let Some(begin) = begin
                 && let Some(end) = end
-                && end == title.len() - 1 && begin != 0 {
-                    if self.arg.title == 1 {
-                        title = title[..begin].to_string();
-                    } else if self.arg.title == 2 {
-                        title = title[(begin + 1)..end].to_string();
-                    }
+                && end == title.len() - 1
+                && begin != 0
+            {
+                if self.arg.title == 1 {
+                    title = title[..begin].to_string();
+                } else if self.arg.title == 2 {
+                    title = title[(begin + 1)..end].to_string();
                 }
+            }
         }
         log::info!("book name = {}", title);
         if title.trim().is_empty() {
@@ -1205,11 +1282,17 @@ impl Spider for Bili {
 
         let menu_url = d
             .find_element(driver::By::Id("btnReadBook"))?
-            .get_property("href")?;
+            .get_property("href")?
+            .map(|f| f.replace("catalog", "1.html"));
 
+        // 使用第一卷作为封面
         let cover = d
-            .find_element(driver::By::Class("book-cover"))?
-            .get_attribute("src")?
+            .find_element(driver::By::Class("module-slide"))?
+            .find_elements(driver::By::Class("module-slide-li"))?
+            .last()
+            .and_then(|f| f.find_element(driver::By::TagName("img")).ok())
+            .and_then(|f| f.get_attribute("data-src").ok())
+            .and_then(|f| f)
             .and_then(|src| {
                 log::info!("cover src = {src}");
                 let c = format!("temp/{}/Images/cover.jpg", self.get_book_id());
@@ -1225,11 +1308,13 @@ impl Spider for Bili {
                     .ok()
             });
 
-        let ass = [&title,
+        let ass = [
+            &title,
             &author,
             &desc,
             &tag,
-            menu_url.as_deref().unwrap_or("")]
+            menu_url.as_deref().unwrap_or(""),
+        ]
         .join(sep);
         std::fs::write(cache, ass).unwrap();
         let mut book = EpubBuilder::new()
@@ -1248,24 +1333,82 @@ impl Spider for Bili {
         let d = self.get_driver();
 
         // 先避开cf
-        if let Err(e) = self.open_url(url.as_str())
-            && format!("{}", e).contains("CF") {
-                log::warn!("");
-                log::warn!("");
-                log::warn!("");
-                log::warn!("");
-                log::warn!("");
-                log::warn!("cf, plese verify manually, and press any key to continue");
-                log::warn!("");
-                log::warn!("");
-                log::warn!("");
-                log::warn!("");
-                log::warn!("");
-                let mut ignore = String::new();
-                let _ = std::io::stdin().read_line(&mut ignore);
-            }
+        let mut str: Vec<HashMap<String, String>> = if let Err(e) = self.open_url(url.as_str())
+            && format!("{}", e).contains("CF")
+        {
+            log::warn!("");
+            log::warn!("");
+            log::warn!("");
+            log::warn!("");
+            log::warn!("");
+            log::warn!("cf, plese verify manually, and press any key to continue");
+            log::warn!("");
+            log::warn!("");
+            log::warn!("");
+            log::warn!("");
+            log::warn!(
+                "Or, you can execulate below javascript in browser, and copy the output to terminal."
+            );
 
-        let str :Vec<HashMap<String,String>> = d.execute_script(r#"return Array.from(document.getElementsByClassName("chapter-li")).filter(v=> v.className.indexOf("volume-cover") === -1)
+            log::warn!("Remeber, You MUST open the url \"{}\" firstly", url);
+            log::warn!("");
+            log::warn!("");
+            log::warn!("");
+
+            eprintln!(
+                r#"Array.from(document.getElementsByClassName("chapter-li")).filter(v=> v.className.indexOf("volume-cover") === -1)
+        .map(li=>{{
+        	if (li.className.indexOf("chapter-bar") != -1 ){{
+        		return li.innerText
+        	}}else {{
+        		return li.innerText+'||||'+li.children[0].href
+        	}}
+        }}).join('====')"#
+            );
+            log::warn!("");
+            log::warn!("");
+
+            // 大量文本可能出现缓冲区截断，linux可以使用管道输入解决
+            let mut ignore = String::new();
+            std::io::stdin().read_line(&mut ignore)?;
+
+            ignore = ignore.trim().to_string();
+            if !ignore.is_empty() {
+                log::info!("len={}", ignore.len());
+
+                if ignore.chars().next() != Some('[') {
+                    ignore.remove(0);
+                }
+                // log::info!("last = {:?}",ignore.chars().last())
+                if ignore.chars().last() != Some(']') {
+                    ignore.remove(ignore.len() - 1);
+                }
+
+                let chap = ignore.split("====").collect::<Vec<&str>>();
+
+                log::info!("size ={}", chap.len());
+                chap.iter()
+                    .map(|f| {
+                        if f.contains("||||") {
+                            let t: Vec<_> = f.split("||||").collect();
+                            HashMap::from([
+                                ("title".to_string(), t[0].to_string()),
+                                ("url".to_string(), t[1].to_string()),
+                            ])
+                        } else {
+                            HashMap::from([("title".to_string(), f.to_string())])
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        // "第一卷 ─空白的王座与七名伪王─====插图||||https://www.bilinovel.com/novel/4981/308050.html====序||||https://www.bilinovel.com/novel/4981/308051.html====一、荣光桥弑王案 1||||https://www.bilinovel.com/novel/4981/308052.html====一、荣光桥弑王案 2||||https://www.bilinovel.com/novel/4981/308053.html====一、荣光桥弑王案 3||||https://www.bilinovel.com/novel/4981/308054.html====二、血华楼纵火案 1||||https://www.bilinovel.com/novel/4981/308055.html====二、血华楼纵火案 2||||https://www.bilinovel.com/novel/4981/308056.html====二、血华楼纵火案 3||||https://www.bilinovel.com/novel/4981/308057.html====二、血华楼纵火案 4||||https://www.bilinovel.com/novel/4981/308058.html====三、龙骸洞袭击案 1||||https://www.bilinovel.com/novel/4981/308059.html====三、龙骸洞袭击案 2||||https://www.bilinovel.com/novel/4981/308060.html====三、龙骸洞袭击案 3||||https://www.bilinovel.com/novel/4981/308061.html====三、龙骸洞袭击案 4||||https://www.bilinovel.com/novel/4981/308062.html====四、混沌秘宫毁损案 1||||https://www.bilinovel.com/novel/4981/308063.html====四、混沌秘宫毁损案 2||||https://www.bilinovel.com/novel/4981/308064.html====四、混沌秘宫毁损案 3||||https://www.bilinovel.com/novel/4981/308065.html====五、报告书 关于所罗门之死||||https://www.bilinovel.com/novel/4981/308066.html====后记||||https://www.bilinovel.com/novel/4981/308067.html====第二卷 ─染血的圣剑与致命亡灵─====插图||||https://www.bilinovel.com/novel/4981/308122.html====序||||https://www.bilinovel.com/novel/4981/308123.html====一、魔导骑士辗毙案 1||||https://www.bilinovel.com/novel/4981/308124.html====一、魔导骑士辗毙案 2||||https://www.bilinovel.com/novel/4981/308125.html====二、魔导骑士连续杀人案 1||||javascript:cid(1)====二、魔导骑士连续杀人案 2||||https://www.bilinovel.com/novel/4981/308127.html====二、魔导骑士连续杀人案 3||||https://www.bilinovel.com/novel/4981/308128.html====三、雷鸣街雷击案 1||||https://www.bilinovel.com/novel/4981/308129.html====三、雷鸣街雷击案 2||||https://www.bilinovel.com/novel/4981/308130.html====三、雷鸣街雷击案 3||||https://www.bilinovel.com/novel/4981/308131.html====四、调整官包围狙击案 1||||https://www.bilinovel.com/novel/4981/308132.html====四、调整官包围狙击案 2||||https://www.bilinovel.com/novel/4981/308133.html====五、紫电迷宫爆破崩塌案 1||||https://www.bilinovel.com/novel/4981/308134.html====五、紫电迷宫爆破崩塌案 2||||https://www.bilinovel.com/novel/4981/308135.html====六、伪造圣剑私制案 1||||https://www.bilinovel.com/novel/4981/308136.html====六、伪造圣剑私制案 2||||https://www.bilinovel.com/novel/4981/308137.html====七、报告书 关于圣剑的伪造与「致命者」||||https://www.bilinovel.com/novel/4981/308138.html====后记||||https://www.bilinovel.com/novel/4981/308139.html"
+        if str.is_empty() {
+            str  = d.execute_script(r#"return Array.from(document.getElementsByClassName("chapter-li")).filter(v=> v.className.indexOf("volume-cover") === -1)
         .map(li=>{
         	if (li.className.indexOf("chapter-bar") != -1 ){
         		return { title:li.innerText }
@@ -1273,6 +1416,7 @@ impl Spider for Bili {
         		return {title:li.innerText,url:li.children[0].href}
         	}
         })"#, &[]).unwrap();
+        };
 
         #[inline]
         fn get_content_url(urls: &[HashMap<String, String>], index: usize) -> (String, bool) {
@@ -1405,7 +1549,7 @@ impl Spider for Bili {
                 }
             }
 
-            let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0]; Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return [ location.protocol+"//"+location.host + ReadParams.url_next, Array.from(document.getElementById("acontent").getElementsByTagName("img")).map((v,index)=>{  var src = v.getAttribute("data-src"); if(src){v.removeAttribute("data-src");}else{ src = v.getAttribute("src"); } v.setAttribute("src",start + index+'.jpg'); return src;    }).join("\n"), document.getElementById("acontent").innerHTML ];"#, &[img_src_prefix.as_str()])?;
+            let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0];Array.from(document.getElementById('acontent').getElementsByTagName('p')).map(v=>window.getComputedStyle(v).position=='absolute' && v.remove()); Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return [ location.protocol+"//"+location.host + ReadParams.url_next, Array.from(document.getElementById("acontent").getElementsByTagName("img")).map((v,index)=>{  var src = v.getAttribute("data-src"); if(src){v.removeAttribute("data-src");}else{ src = v.getAttribute("src"); } v.setAttribute("src",start + index+'.jpg'); return src;    }).join("\n"), document.getElementById("acontent").innerHTML ];"#, &[img_src_prefix.as_str()])?;
             // let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0]; Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return [ location.protocol+"//"+location.host + ReadParams.url_next, "", document.getElementById("acontent").innerHTML ];"#, &[img_src_prefix.as_str()])?;
 
             let next = &out[0];
@@ -1586,9 +1730,10 @@ fn main() {
             .as_str(),
         )
         .disable_css()
+        .disable_image()
         .disable_javascript()
         .add_pref_string("intl.accepg_languages", "zh-CN,en-US")
-        .timeout(240);
+        .timeout(60);
     if !arg.proxy.is_empty() {
         option = option.proxy(Proxy::manual().ssl_proxy(&arg.proxy));
     }
