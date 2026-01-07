@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     io::{BufRead, Read, Write},
     thread::sleep,
@@ -132,8 +132,8 @@ mod cos {
                 "https://{}.cos.ap-{}.myqcloud.com/{path}",
                 self.bucket_id, self.region
             );
-            println!("host {host}");
 
+            
             match ureq::get(host)
                 .header(
                     "Referer",
@@ -142,7 +142,6 @@ mod cos {
                 .call()
             {
                 Ok(mut res) => {
-                    println!("{:?}", res.headers());
                     res.body_mut()
                         .with_config()
                         .limit(200 * 1024 * 1024)
@@ -465,24 +464,26 @@ pub(crate) trait Spider {
     /// # Returns
     ///
     /// 返回html和图片的src集合字符串；html应该已经处理好img src的转变
-    fn get_content(&self, url: String, img_src_prefix: String) -> anyhow::Result<(String, String)>;
+    fn get_content(&self, url: String, img_src_prefix: String)
+    -> anyhow::Result<(String, ImgList)>;
 
     ///
     /// url,filename
     ///
-    fn get_img_src(&self, src: &str, img_src_prefix: String) -> Vec<ImgSrc> {
+    fn get_img_src(&self, src: &ImgList, img_src_prefix: String) -> Vec<ImgSrc> {
         if src.is_empty() {
             return Vec::new();
         }
-        let v: Vec<_> = src.split("\n").collect();
 
-        v.iter()
+        src.inner
+            .iter()
+            .flat_map(|f| f.1.iter())
             .enumerate()
-            .filter(|(_, url)| !url.trim().is_empty())
-            .map(|(index, url)| ImgSrc {
+            .filter(|(_, (url, _))| !url.trim().is_empty())
+            .map(|(index, (url, hash))| ImgSrc {
                 book_id: self.get_book_id(),
                 url: url.to_string(),
-                filename: format!("{}{}.jpg", img_src_prefix, index),
+                filename: format!("{}{}.jpg", img_src_prefix, hash),
             })
             .collect()
     }
@@ -534,7 +535,7 @@ pub(crate) trait Spider {
 
     fn get_img_data(
         &self,
-        src: &str,
+        src: &ImgList,
         img_filename_prefix: String,
     ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
         let mut assets = Vec::new();
@@ -582,6 +583,7 @@ pub(crate) trait Spider {
 
         let mut navs = Vec::new();
         let mut nav: Option<EpubNav> = None;
+        let mut distinct_assets = HashSet::new();
 
         // 解析menu_str
         let m = self.get_menu_from_str(menu_str)?;
@@ -602,19 +604,20 @@ pub(crate) trait Spider {
                         .ok()
                         .map(|f| if f { Some(f) } else { None })
                         .and_then(|_| std::fs::read_to_string(src_temp.as_str()).ok())
-                        .or(Some(String::new()))
+                        .map(|f| ImgList::from(f.as_str()))
+                        .or_else(||{
+                            Some(ImgList::new())
+                        })
                 {
                     (
                         self.convert_html(html),
-                        self.get_img_data(src.as_str(), format!("{index}-"))?,
+                        self.get_img_data(&src, format!(""))?,
                     )
                 } else {
-                    let mut con = (String::new(), String::new());
+                    let mut con = (String::new(), ImgList::new());
 
                     for i in 0..self.get_arg().retry {
-                        match self
-                            .get_content(url.clone(), format!("../{}/{index}-", ImgSrc::dir_name()))
-                        {
+                        match self.get_content(url.clone(), format!("../{}/", ImgSrc::dir_name())) {
                             Ok(v) => {
                                 con = v;
                                 break;
@@ -636,11 +639,11 @@ pub(crate) trait Spider {
                     let (html, src) = con;
                     std::fs::write(html_temp.as_str(), html.as_str())?;
                     if !src.is_empty() {
-                        std::fs::write(src_temp.as_str(), src.as_str())?;
+                        std::fs::write(src_temp.as_str(), src.to_string().as_str())?;
                     }
                     (
                         self.convert_html(html),
-                        self.get_img_data(src.as_str(), format!("{index}-"))?,
+                        self.get_img_data(&src, format!(""))?,
                     )
                 };
 
@@ -651,7 +654,9 @@ pub(crate) trait Spider {
                         .with_data(html.as_bytes().to_vec()),
                 );
                 for ele in assets {
-                    builder = builder.add_assets(ele.0.as_str(), ele.1);
+                    if distinct_assets.insert(ele.0.clone()) {
+                        builder = builder.add_assets(ele.0.as_str(), ele.1);
+                    }
                 }
 
                 if let Some(n) = &mut nav {
@@ -1007,39 +1012,57 @@ impl Spider for Wenku8 {
         Ok(res)
     }
 
-    fn get_content(&self, url: String, img_src_prefix: String) -> anyhow::Result<(String, String)> {
+    fn get_content(
+        &self,
+        url: String,
+        img_src_prefix: String,
+    ) -> anyhow::Result<(String, ImgList)> {
         // 切换新标签页
         let handle = self.driver.get_window_handle()?;
         let nw = self.driver.new_window(driver::NewWindowType::Tab)?;
         self.driver.switch_to_window((nw).as_str())?;
 
         self.open_url(url.as_str())?;
-        let src: String = if self.arg.no_img {
-            String::new()
+        let src: Vec<String> = if self.arg.no_img {
+            Vec::new()
         } else {
-            self.driver.execute_script(r#"
+            self.driver.execute_script(
+                r#"
     for(;;){var s = document.getElementById("contentdp");if(s){s.remove();}else{break;}}
-    var s=document.getElementById("content");s.removeAttribute("style");
-    var src = Array.from(s.getElementsByTagName('img')).map(v=>v.getAttribute('src')).join('\n');
-    var start = arguments[0];
-    Array.from(s.getElementsByTagName('img')).forEach((v,index)=>v.setAttribute('src', start+index+'.jpg'));
-    return src;
-    "#, &[img_src_prefix.as_str()])?
+    var s = document.getElementById("content");s.removeAttribute("style");
+    return Array.from(s.getElementsByTagName('img')).map(v=>v.getAttribute('src'));
+    "#,
+                &[img_src_prefix.as_str()],
+            )?
         };
 
-        let html = self
-            .driver
-            .find_element(driver::By::Id("content"))?
-            .get_property("innerHTML")?;
+        // hash
+        let mut img_list = ImgList::new();
+        let src_hash: Vec<(String, String)> =
+            src.into_iter().map(|f| (hash_url(f.as_str()), f)).collect();
+
+        for ele in src_hash.iter() {
+            img_list.push_img(&url, ele.1.as_str(), ele.0.as_str());
+        }
+        let j = format!(
+            r#"{{{}}}"#,
+            src_hash
+                .iter()
+                .map(|(hash, url)| format!(r#""{}":"{}""#, url, hash))
+                .collect::<Vec<String>>()
+                .join(",")
+        );
+        let html:String = self.get_driver().execute_script(r#"var hash = JSON.parse(arguments[0]);var start = arguments[1];var s = document.getElementById("content"); Array.from(s.getElementsByClassName('divimage')).map(d=>{ var v = d.getElementsByTagName('img')[0];  v.removeAttribute("border"); v.removeAttribute("class");var src = v.getAttribute("src"); var use = hash[src]; if(use){ d.outerHTML='<img src="'+start+use+'.jpg'+'"/>'  }  }); return   document.getElementById("content").innerHTML ;  "#, &[j.as_str(),img_src_prefix.as_str()])?;
 
         sleep(Duration::from_secs(self.arg.sleep));
         self.driver.close_window()?;
         self.driver.switch_to_window(&handle)?;
-        Ok((html.unwrap_or_else(String::new), src))
+        Ok((html, img_list))
     }
 
     fn convert_html(&self, html: String) -> String {
         let v = html
+            .replace(r#".jpg">"#, r#".jpg"/>"#)
             .replace("&nbsp;&nbsp;&nbsp;&nbsp;", "<p>")
             .replace(
                 r#"<br>
@@ -1098,7 +1121,7 @@ impl Bili {
 
 #[derive(Debug)]
 struct ImgList {
-    pub(crate) inner: Vec<(String, Vec<String>)>,
+    pub(crate) inner: Vec<(String, Vec<(String, String)>)>,
 }
 
 impl ImgList {
@@ -1112,10 +1135,11 @@ impl ImgList {
         let v: Vec<_> = src.split("\n").collect();
         let mut page = String::new();
         for ele in v {
-            if ele.contains(".html") {
+            if !ele.contains("||||") {
                 page = ele.to_string();
             } else if !page.is_empty() {
-                s.push_img(page.as_str(), ele);
+                let h: Vec<_> = ele.split("||||").collect();
+                s.push_img(page.as_str(), h[0], h[1]);
             }
         }
         s
@@ -1124,21 +1148,37 @@ impl ImgList {
     fn to_string(&self) -> String {
         self.inner
             .iter()
-            .map(|v| format!("{}\n{}", v.0, v.1.join("\n")))
+            .map(|v| {
+                format!(
+                    "{}\n{}",
+                    v.0,
+                    v.1.iter()
+                        .map(|f| format!("{}||||{}", f.0, f.1))
+                        .collect::<Vec<String>>()
+                        .join("\n")
+                )
+            })
             .collect::<Vec<String>>()
             .join("\n")
     }
 
-    fn push_img(&mut self, page: &str, img: &str) {
-        if page.is_empty() || img.is_empty() {
+    fn push_img(&mut self, page: &str, img_real_src: &str, hash: &str) {
+        if page.is_empty() || img_real_src.is_empty() || hash.is_empty() {
             return;
         }
         let v = self.inner.iter_mut().find(|v| v.0 == page);
         if let Some(v) = v {
-            v.1.push(img.to_string());
+            v.1.push((img_real_src.to_string(), hash.to_string()));
         } else {
-            self.inner.push((page.to_string(), vec![img.to_string()]));
+            self.inner.push((
+                page.to_string(),
+                vec![(img_real_src.to_string(), hash.to_string())],
+            ));
         }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 }
 
@@ -1261,7 +1301,8 @@ impl Spider for Bili {
         let d = self.get_driver();
 
         let title = d
-            .find_element(driver::By::Class("book-title"))?
+            .find_element(driver::By::Class("bkname-body"))
+            .or_else(|_| d.find_element(driver::By::Class("book-title")))?
             .get_text()?;
 
         log::info!("book name={}", title);
@@ -1528,13 +1569,17 @@ impl Spider for Bili {
             .collect())
     }
 
-    fn get_content(&self, url: String, img_src_prefix: String) -> anyhow::Result<(String, String)> {
+    fn get_content(
+        &self,
+        url: String,
+        img_src_prefix: String,
+    ) -> anyhow::Result<(String, ImgList)> {
         let mut html = String::new();
         let mut url = url;
         let mut img_list = ImgList::new();
         loop {
             self.open_url(url.as_str())?;
-            let img_src_prefix = format!("{img_src_prefix}{}-", img_list.inner.len());
+            // let img_src_prefix = format!("{img_src_prefix}{}-", img_list.inner.len());
             // 校验文本截断
             for j in 0..3 {
                 let s :bool = self.driver.execute_script(r#"var s = document.getElementById('acontent').innerText; return s.indexOf("客户端停用") == -1 && s.indexOf("如需繼續閱讀請使用") == -1"#, &[])?;
@@ -1548,15 +1593,30 @@ impl Spider for Bili {
                     self.driver.refresh()?;
                 }
             }
+            // 首先获取所有 真实 src，hash 后替换src属性
+            let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0];Array.from(document.getElementById('acontent').getElementsByTagName('p')).map(v=>window.getComputedStyle(v).position=='absolute' && v.remove()); Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return Array.from(document.getElementById("acontent").getElementsByTagName("img")).map((v,index)=>{  var src = v.getAttribute("data-src"); if(src){v.removeAttribute("data-src");}else{ src = v.getAttribute("src"); } v.setAttribute("src",src); return src ;    });"#, &[img_src_prefix.as_str()])?;
 
-            let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0];Array.from(document.getElementById('acontent').getElementsByTagName('p')).map(v=>window.getComputedStyle(v).position=='absolute' && v.remove()); Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return [ location.protocol+"//"+location.host + ReadParams.url_next, Array.from(document.getElementById("acontent").getElementsByTagName("img")).map((v,index)=>{  var src = v.getAttribute("data-src"); if(src){v.removeAttribute("data-src");}else{ src = v.getAttribute("src"); } v.setAttribute("src",start + index+'.jpg'); return src;    }).join("\n"), document.getElementById("acontent").innerHTML ];"#, &[img_src_prefix.as_str()])?;
+            let src_hash: Vec<(String, String)> =
+                out.into_iter().map(|f| (hash_url(f.as_str()), f)).collect();
+
+            for ele in src_hash.iter() {
+                img_list.push_img(&url, ele.1.as_str(), ele.0.as_str());
+            }
+
+            let j = format!(
+                r#"{{{}}}"#,
+                src_hash
+                    .iter()
+                    .map(|(hash, url)| format!(r#""{}":"{}""#, url, hash))
+                    .collect::<Vec<String>>()
+                    .join(",")
+            );
+            let out:Vec<String> = self.get_driver().execute_script(r#"var hash = JSON.parse(arguments[0]);var start = arguments[1]; Array.from(document.getElementById("acontent").getElementsByTagName("img")).map(v=>{ var src = v.getAttribute("src"); var use = hash[src]; if(use){v.setAttribute("src",start+use+'.jpg');}  }); return [ location.protocol+"//"+location.host + ReadParams.url_next, document.getElementById("acontent").innerHTML ];  "#, &[j.as_str(),img_src_prefix.as_str()])?;
+            // let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0];Array.from(document.getElementById('acontent').getElementsByTagName('p')).map(v=>window.getComputedStyle(v).position=='absolute' && v.remove()); Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return [ location.protocol+"//"+location.host + ReadParams.url_next, Array.from(document.getElementById("acontent").getElementsByTagName("img")).map((v,index)=>{  var src = v.getAttribute("data-src"); if(src){v.removeAttribute("data-src");}else{ src = v.getAttribute("src"); } v.setAttribute("src",start + index+'.jpg'); return src + "||||"+ (start + index+'.jpg');    }).join("\n"), document.getElementById("acontent").innerHTML ];"#, &[img_src_prefix.as_str()])?;
             // let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0]; Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return [ location.protocol+"//"+location.host + ReadParams.url_next, "", document.getElementById("acontent").innerHTML ];"#, &[img_src_prefix.as_str()])?;
 
             let next = &out[0];
-            if !&out[1].trim().is_empty() {
-                img_list.push_img(url.as_str(), out[1].trim());
-            }
-            html.push_str(out[2].as_str());
+            html.push_str(out[1].as_str());
             if next.contains("_") {
                 log::info!("next {}", next);
                 // 还要翻页
@@ -1567,7 +1627,7 @@ impl Spider for Bili {
             }
         }
 
-        Ok((html, img_list.to_string()))
+        Ok((html, img_list))
     }
 
     fn convert_html(&self, html: String) -> String {
@@ -1582,80 +1642,69 @@ impl Spider for Bili {
 
     fn get_img_data(
         &self,
-        src: &str,
+        img_list: &ImgList,
         img_filename_prefix: String,
     ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
         let mut assets = Vec::new();
 
-        let img_list = ImgList::from(src);
+        let img = self.get_img_src(&img_list, format!("{img_filename_prefix}"));
 
-        for (i, ele) in img_list.inner.iter().enumerate() {
-            let url = ele.0.to_string();
-            if url.is_empty() {
-                continue;
+        // 分成两部分，已下载的直接读取，未下载的重新加载
+        let mut downloaded_img = Vec::new();
+        let mut undownload_img = Vec::new();
+
+        for (index, i) in img.iter().enumerate() {
+            if std::fs::exists(i.cache_path()).unwrap_or(false) {
+                downloaded_img.push(i);
+            } else {
+                undownload_img.push((index, i));
             }
-            let src = ele.1.join("\n");
-            let img = self.get_img_src(&src, format!("{img_filename_prefix}{i}-"));
+        }
+        if !undownload_img.is_empty() {
+            // 下载图片
+            // let run = tokio::runtime::Builder::new_current_thread()
+            //     .enable_all()
+            //     .build()?;
 
-            log::info!("page ={url} img src = {:?}", img);
+            for (_index, src) in &undownload_img {
+                log::info!(
+                    "downloading img from [{}] to [{}]",
+                    src.url,
+                    src.cache_path()
+                );
 
-            // 分成两部分，已下载的直接读取，未下载的重新加载
-            let mut downloaded_img = Vec::new();
-            let mut undownload_img = Vec::new();
-
-            for (index, i) in img.iter().enumerate() {
-                if std::fs::exists(i.cache_path()).unwrap_or(false) {
-                    downloaded_img.push(i);
-                } else {
-                    undownload_img.push((index, i));
-                }
-            }
-            if !undownload_img.is_empty() {
-                // 下载图片
-                // let run = tokio::runtime::Builder::new_current_thread()
-                //     .enable_all()
-                //     .build()?;
-
-                for (_index, src) in &undownload_img {
-                    log::info!(
-                        "downloading img from [{}] to [{}]",
-                        src.url,
-                        src.cache_path()
-                    );
-
-                    for i in 1..=self.get_arg().retry {
-                        // if let Ok(_) = run.block_on(self.download_img(&src.url, &src.cache_path()))
-                        match self.download_img(&src.url, src.cache_path()) {
-                            Ok(_) => {
-                                log::info!("remove down {:?}  {:?}", src, undownload_img);
-                                downloaded_img.push(*src);
-                                break;
-                            }
-                            Err(e) => {
-                                if i == self.get_arg().retry {
-                                    return Err(anyhow::Error::msg(format!(
-                                        "img load fail, retry {}/{}",
-                                        i,
-                                        self.get_arg().retry
-                                    )));
-                                }
-                                log::warn!(
-                                    "download img fail, retry {}/{},reason: {}",
+                for i in 1..=self.get_arg().retry {
+                    // if let Ok(_) = run.block_on(self.download_img(&src.url, &src.cache_path()))
+                    match self.download_img(&src.url, src.cache_path()) {
+                        Ok(_) => {
+                            log::info!("remove down {:?}  {:?}", src, undownload_img);
+                            downloaded_img.push(*src);
+                            break;
+                        }
+                        Err(e) => {
+                            if i == self.get_arg().retry {
+                                return Err(anyhow::Error::msg(format!(
+                                    "img load fail, retry {}/{}",
                                     i,
-                                    self.get_arg().retry,
-                                    e
-                                );
+                                    self.get_arg().retry
+                                )));
                             }
+                            log::warn!(
+                                "download img fail, retry {}/{},reason: {}",
+                                i,
+                                self.get_arg().retry,
+                                e
+                            );
                         }
                     }
                 }
             }
-
-            // 读取图片
-            for ele in downloaded_img {
-                assets.push((ele.epub_path(), std::fs::read(ele.cache_path())?));
-            }
         }
+        // 读取图片
+        for ele in downloaded_img {
+            assets.push((ele.epub_path(), std::fs::read(ele.cache_path())?));
+        }
+
         Ok(assets)
     }
 }
