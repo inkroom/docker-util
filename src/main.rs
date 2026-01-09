@@ -1,3 +1,4 @@
+#[allow(unused)]
 use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
@@ -133,7 +134,6 @@ mod cos {
                 self.bucket_id, self.region
             );
 
-            
             match ureq::get(host)
                 .header(
                     "Referer",
@@ -141,16 +141,15 @@ mod cos {
                 )
                 .call()
             {
-                Ok(mut res) => {
-                    res.body_mut()
-                        .with_config()
-                        .limit(200 * 1024 * 1024)
-                        .read_to_vec()
-                        .map_err(|e| {
-                            log::error!("cos {:?}", e);
-                            0
-                        })
-                }
+                Ok(mut res) => res
+                    .body_mut()
+                    .with_config()
+                    .limit(200 * 1024 * 1024)
+                    .read_to_vec()
+                    .map_err(|e| {
+                        log::error!("cos {:?}", e);
+                        0
+                    }),
                 Err(ureq::Error::StatusCode(code)) => {
                     if code == 404 {
                         Err(code)
@@ -605,9 +604,7 @@ pub(crate) trait Spider {
                         .map(|f| if f { Some(f) } else { None })
                         .and_then(|_| std::fs::read_to_string(src_temp.as_str()).ok())
                         .map(|f| ImgList::from(f.as_str()))
-                        .or_else(||{
-                            Some(ImgList::new())
-                        })
+                        .or_else(|| Some(ImgList::new()))
                 {
                     (
                         self.convert_html(html),
@@ -1589,12 +1586,12 @@ impl Spider for Bili {
                     if j == 2 {
                         return Err(anyhow::Error::msg("content sub"));
                     }
-                    log::info!("contnet sub refresh {j} {url}");
+                    log::info!("content sub refresh {j} {url}");
                     self.driver.refresh()?;
                 }
             }
             // 首先获取所有 真实 src，hash 后替换src属性
-            let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0];Array.from(document.getElementById('acontent').getElementsByTagName('p')).map(v=>window.getComputedStyle(v).position=='absolute' && v.remove()); Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return Array.from(document.getElementById("acontent").getElementsByTagName("img")).map((v,index)=>{  var src = v.getAttribute("data-src"); if(src){v.removeAttribute("data-src");}else{ src = v.getAttribute("src"); } v.setAttribute("src",src); return src ;    });"#, &[img_src_prefix.as_str()])?;
+            let out:Vec<String> = self.driver.execute_script(r#"var start = arguments[0];Array.from(document.getElementById('acontent').getElementsByTagName('p')).map(v=>{ window.getComputedStyle(v).position=='absolute' && v.remove(); var key = v.getAttributeNames().filter(v=>v.startsWith('data-k'))[0]; if(key){v.removeAttribute(key);} return key;}); Array.from(document.getElementsByClassName('cgo')).map(v=>v.remove()); Array.from(document.getElementById("acontent").getElementsByTagName("div")).map(v=>v.remove());  return Array.from(document.getElementById("acontent").getElementsByTagName("img")).map((v,index)=>{  var src = v.getAttribute("data-src"); v.removeAttribute('border'); if(src){v.removeAttribute("data-src");}else{ src = v.getAttribute("src"); } v.setAttribute("src",src); return src ;    });"#, &[img_src_prefix.as_str()])?;
 
             let src_hash: Vec<(String, String)> =
                 out.into_iter().map(|f| (hash_url(f.as_str()), f)).collect();
@@ -1631,10 +1628,7 @@ impl Spider for Bili {
     }
 
     fn convert_html(&self, html: String) -> String {
-        let re = regex::Regex::new("<p data-k[0-9]{6,10}=\"\">").unwrap();
-        re.replace_all(html.as_str(), "<p>")
-            .to_string()
-            .replace(r#" class="imagecontent lazyload">"#, "/>")
+        html.replace(r#" class="imagecontent lazyload">"#, "/>")
             .replace(r#" class="imagecontent lazyloaded">"#, "/>")
             .replace("<br>", "<br/>")
             .replace(r#" class="imagecontent">"#, "/>")
